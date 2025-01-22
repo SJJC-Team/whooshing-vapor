@@ -431,7 +431,10 @@ private final class HTTPServerConnection: Sendable {
             .childChannelInitializer { [unowned application, unowned server] channel in
                 /// Copy the most up-to-date configuration.
                 let configuration = server.configuration
-
+                if let httpIOHandler = application.httpIOHandler {
+                    /// 如果设置了 http IO 加密，则进行加密，否则无事发生
+                    channel.pipeline.addHandler(CustomCryptoIOHandler(logger: application.logger, ioHandler: httpIOHandler))
+                }
                 /// Add TLS handlers if configured.
                 if var tlsConfiguration = configuration.tlsConfiguration {
                     /// Prioritize http/2 if supported.
