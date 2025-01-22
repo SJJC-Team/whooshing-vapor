@@ -62,15 +62,13 @@ final class CustomCryptoIOHandler: ChannelDuplexHandler {
     
     let logger: Logger
     let ioHandler: HTTPIOHandler
-    let context: ChannelHandlerContext
     
     var bytes: [ByteBuffer] = []
     var i = 0
     
-    init(logger: Logger, ioHandler: HTTPIOHandler, context: ChannelHandlerContext) {
+    init(logger: Logger, ioHandler: HTTPIOHandler) {
         self.logger = logger
         self.ioHandler = ioHandler
-        self.context = context
     }
     
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
