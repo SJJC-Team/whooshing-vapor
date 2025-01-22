@@ -3,7 +3,15 @@ import Logging
 
 public extension Application {
     /// 为 HTTP IO 流配置流处理，如果为 nil，则不进行任何处理
-    public var httpIOHandler: HTTPIOHandler? { nil }
+    public var httpIOHandler: HTTPIOHandler? { self.storage[HttpIoHandler.self] }
+    
+    func use(httpIOHandler handler: HTTPIOHandler) {
+        self.storage[HttpIoHandler.self] = handler
+    }
+    
+    public struct HttpIoHandler: StorageKey {
+        public typealias Value = HTTPIOHandler
+    }
 }
 
 /// 实现该协议为 HTTP IO 流配置流处理，例如加解密
