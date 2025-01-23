@@ -424,17 +424,16 @@ private final class HTTPServerConnection: Sendable {
             
             /// Set handlers that are applied to the Server's channel.
             .serverChannelInitializer { channel in
-                channel.pipeline.addHandler(quiesce.makeServerChannelHandler(channel: channel))
+                application.storage[Channels.self] = .init()
+                return channel.pipeline.addHandler(quiesce.makeServerChannelHandler(channel: channel))
             }
             
             /// Set the handlers that are applied to the accepted Channels.
             .childChannelInitializer { [unowned application, unowned server] channel in
                 /// Copy the most up-to-date configuration.
                 let configuration = server.configuration
-                if let httpIOHandler = application.httpIOHandler {
                     /// 如果设置了 http IO 加密，则进行加密，否则无事发生
-                    channel.pipeline.addHandler(CustomCryptoIOHandler(logger: application.logger, ioHandler: httpIOHandler))
-                }
+                channel.pipeline.addHandler(CustomCryptoIOHandler(app: application, ioHandler: application.httpIOHandler))
                 /// Add TLS handlers if configured.
                 if var tlsConfiguration = configuration.tlsConfiguration {
                     /// Prioritize http/2 if supported.
@@ -579,7 +578,7 @@ extension ChannelPipeline {
         handlers.append(serverResEncoder)
         
         /// Add server request → response delegate.
-        let handler = HTTPServerHandler(responder: responder, logger: application.logger)
+        let handler = HTTPServerHandler(responder: responder, logger: application.logger, app: application)
         handlers.append(handler)
         
         return self.addHandlers(handlers).flatMap {
@@ -637,12 +636,13 @@ extension ChannelPipeline {
         )
         handlers.append(serverReqDecoder)
         /// Add server request → response delegate.
-        let handler = HTTPServerHandler(responder: responder, logger: application.logger)
+        let handler = HTTPServerHandler(responder: responder, logger: application.logger, app: application)
 
         /// Add HTTP upgrade handler.
         let upgrader = HTTPServerUpgradeHandler(
             httpRequestDecoder: httpReqDecoder,
-            httpHandlers: handlers + [handler]
+            httpHandlers: handlers + [handler],
+            app: application
         )
 
         handlers.append(upgrader)

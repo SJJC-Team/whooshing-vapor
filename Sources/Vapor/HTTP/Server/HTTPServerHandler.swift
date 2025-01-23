@@ -7,17 +7,20 @@ final class HTTPServerHandler: ChannelInboundHandler, RemovableChannelHandler {
     
     let responder: Responder
     let logger: Logger
+    let app: Application
     var isShuttingDown: Bool
     
-    init(responder: Responder, logger: Logger) {
+    init(responder: Responder, logger: Logger, app: Application) {
         self.responder = responder
         self.logger = logger
         self.isShuttingDown = false
+        self.app = app
     }
     
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let box = NIOLoopBound((context, self), eventLoop: context.eventLoop)
         let request = self.unwrapInboundIn(data)
+        app.channels[context.channel]!.currentRequestID = request.id
         // hop(to:) is required here to ensure we're on the correct event loop
         self.responder.respond(to: request).hop(to: context.eventLoop).whenComplete { response in
             let (context, handler) = box.value

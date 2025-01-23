@@ -20,13 +20,17 @@ final class HTTPServerUpgradeHandler: ChannelDuplexHandler, RemovableChannelHand
     let httpRequestDecoder: ByteToMessageHandler<HTTPRequestDecoder>
     let httpHandlers: [RemovableChannelHandler]
     
+    private var app: Application
+    
     init(
         httpRequestDecoder: ByteToMessageHandler<HTTPRequestDecoder>,
-        httpHandlers: [RemovableChannelHandler]
+        httpHandlers: [RemovableChannelHandler],
+        app: Application
     ) {
         self.upgradeState = .ready
         self.httpRequestDecoder = httpRequestDecoder
         self.httpHandlers = httpHandlers
+        self.app = app
     }
     
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
@@ -61,6 +65,7 @@ final class HTTPServerUpgradeHandler: ChannelDuplexHandler, RemovableChannelHand
                 return (box.status, box.upgrader)
             }
             if status == .switchingProtocols, let upgrader = upgrader {
+                app.channels[context.channel]!.upgraded = true
                 let protocolUpgrader = upgrader.applyUpgrade(req: req, res: res)
                 let sendableBox = SendableBox(
                     context: context,
