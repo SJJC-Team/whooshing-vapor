@@ -26,10 +26,9 @@ public protocol HTTPIOHandler: Sendable {
     ///
     /// - 参数：
     ///     - request: 从客户端发来的原始的未解密的请求数据 Data
-    ///     - context: 该请求连线的上下文，可以通过其获取对应的 Info，见下一个参数
-    ///     - info: 该连线的附加信息，包括是否为 WebSocket，以及当前请求的 ID
+    ///     - context: 该请求连线的上下文
     /// - 返回：解包过后的请求数据 Data
-    func input(request: Data, context: ChannelHandlerContext, info: ChannelInfo) throws -> Data
+    func input(request: Data, context: ChannelHandlerContext) throws -> Data
     /// 当该服务器对客户端做出响应时，包装将要做出的响应。通常是进行加密操作，以保护响应不被窃取
     ///
     /// - 参数：
@@ -42,10 +41,9 @@ public protocol HTTPIOHandler: Sendable {
     ///
     /// - 参数：
     ///     - request: 从客户端发来的原始的未解密的请求数据 ByteBuffer
-    ///     - context: 该请求连线的上下文，可以通过其获取对应的 Info，见下一个参数
-    ///     - info: 该连线的附加信息，包括是否为 WebSocket，以及当前请求的 ID
+    ///     - context: 该请求连线的上下文
     /// - 返回：解包过后的请求数据 ByteBuffer
-    func input(request: ByteBuffer, context: ChannelHandlerContext, info: ChannelInfo) throws -> ByteBuffer
+    func input(request: ByteBuffer, context: ChannelHandlerContext) throws -> ByteBuffer
     /// 当该服务器对客户端做出响应时，包装将要做出的响应。通常是进行加密操作，以保护响应不被窃取。免去 ByteBuffer 与 Data 互转的步骤，直接操作 ByteBuffer，更加轻量
     ///
     /// - 参数：
@@ -65,15 +63,15 @@ public protocol HTTPIOHandler: Sendable {
 public extension HTTPIOHandler {
     
     /// 默认不进行任何处理，直接将 request 作为返回值
-    func input(request: Data, context: ChannelHandlerContext, info: ChannelInfo) throws -> Data { request }
+    func input(request: Data, context: ChannelHandlerContext) throws -> Data { request }
     
     /// 默认不进行任何处理，直接将 response 作为返回值
     func output(response: Data, context: ChannelHandlerContext, info: ChannelInfo) throws -> Data { response }
     
     /// 默认调用 `func input(request: Data, context: ChannelHandlerContext, info: ChannelInfo)` 完成处理
-    func input(request: ByteBuffer, context: ChannelHandlerContext, info: ChannelInfo) throws -> ByteBuffer {
+    func input(request: ByteBuffer, context: ChannelHandlerContext) throws -> ByteBuffer {
         let req = Data(buffer: request)
-        return try dataToByteBuffer(data: input(request: req, context: context, info: info))
+        return try dataToByteBuffer(data: input(request: req, context: context))
     }
     
     /// 默认调用 `func output(response: Data, context: ChannelHandlerContext, info: ChannelInfo)` 完成处理
@@ -112,10 +110,9 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler {
     
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let buffer = self.unwrapInboundIn(data)
-        let channelInfo = app.channels[context.channel]!
         if let ioHandler = self.ioHandler {
             do {
-                let req = try ioHandler.input(request: buffer, context: context, info: channelInfo)
+                let req = try ioHandler.input(request: buffer, context: context)
                 context.fireChannelRead(self.wrapOutboundOut(req))
             } catch let err {
                 errorCaught(context: context, label: "Input", error: err)
