@@ -433,7 +433,7 @@ private final class HTTPServerConnection: Sendable {
                 /// Copy the most up-to-date configuration.
                 let configuration = server.configuration
                     /// 如果设置了 http IO 加密，则进行加密，否则无事发生
-                channel.pipeline.addHandler(CustomCryptoIOHandler(app: application, ioHandler: application.httpIOHandler))
+                let c = channel.pipeline.addHandler(CustomCryptoIOHandler(app: application, ioHandler: application.httpIOHandler))
                 /// Add TLS handlers if configured.
                 if var tlsConfiguration = configuration.tlsConfiguration {
                     /// Prioritize http/2 if supported.
@@ -452,7 +452,7 @@ private final class HTTPServerConnection: Sendable {
                         configuration.logger.error("Could not configure TLS: \(error)")
                         return channel.close(mode: .all)
                     }
-                    return channel.pipeline.addHandler(tlsHandler).flatMap { _ in
+                    return c.flatMap { _ in channel.pipeline.addHandler(tlsHandler).flatMap { _ in
                         channel.configureHTTP2SecureUpgrade(h2ChannelConfigurator: { channel in
                             channel.configureHTTP2Pipeline(
                                 mode: .server,
@@ -471,16 +471,16 @@ private final class HTTPServerConnection: Sendable {
                                 configuration: configuration
                             )
                         })
-                    }
+                    }}
                 } else {
                     guard !configuration.supportVersions.contains(.two) else {
                         fatalError("Plaintext HTTP/2 (h2c) not yet supported.")
                     }
-                    return channel.pipeline.addVaporHTTP1Handlers(
+                    return c.flatMap { channel.pipeline.addVaporHTTP1Handlers(
                         application: application,
                         responder: responder,
                         configuration: configuration
-                    )
+                    )}
                 }
             }
             

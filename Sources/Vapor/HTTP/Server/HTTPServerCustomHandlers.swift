@@ -140,7 +140,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler {
             }
         } else {
             bytes.removeAll()
-            context.writeAndFlush(data)
+            context.writeAndFlush(data, promise: promise)
         }
     }
     

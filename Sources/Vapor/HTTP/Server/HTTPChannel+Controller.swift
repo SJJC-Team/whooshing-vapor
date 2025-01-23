@@ -37,7 +37,7 @@ final public class Channels: StorageKey, @unchecked Sendable {
                 }
             } else {
                 lock.sync {
-                    channelInfos.removeValue(forKey: identifier)
+                    let _ = channelInfos.removeValue(forKey: identifier)
                 }
             }
         }
@@ -45,7 +45,7 @@ final public class Channels: StorageKey, @unchecked Sendable {
     
     /// 支持字典语法，按请求 ID 获取 ChannelInfo，`app.channels[request.id]`
     public subscript(requestId: String) -> Channel? {
-        for (k, v) in channelInfos {
+        for (_, v) in channelInfos {
             if v.1.currentRequestID == requestId {
                 return v.0
             }
