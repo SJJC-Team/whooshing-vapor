@@ -123,6 +123,15 @@ public final class Request: CustomStringConvertible, Sendable {
             // ignore since Request is a reference type
         }
     }
+    
+    public var channel: Channel? {
+        get {
+            self.requestBox.withLockedValue { $0.channel?.value }
+        }
+        set {
+            self.requestBox.withLockedValue { $0.channel = WeakContainer(value: newValue) }
+        }
+    }
 
     private struct _ContentContainer: ContentContainer, Sendable {
         let request: Request
@@ -277,6 +286,29 @@ public final class Request: CustomStringConvertible, Sendable {
         var route: Route?
         var parameters: Parameters
         var byteBufferAllocator: ByteBufferAllocator
+        var channel: WeakContainer?
+    }
+    
+    final class WeakContainer: @unchecked Sendable {
+        private weak var _value: Channel?
+        private let lock = NIOLock()
+
+        init(value: Channel?) {
+            self._value = value
+        }
+
+        var value: Channel? {
+            get {
+                lock.lock()
+                defer { lock.unlock() }
+                return _value
+            }
+            set {
+                lock.lock()
+                _value = newValue
+                lock.unlock()
+            }
+        }
     }
     
     let requestBox: NIOLockedValueBox<RequestBox>

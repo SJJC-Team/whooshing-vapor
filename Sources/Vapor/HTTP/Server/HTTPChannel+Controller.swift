@@ -12,13 +12,12 @@ final public class Channels: StorageKey, @unchecked Sendable {
     public typealias Value = Channels
     
     private var channelInfos: [ObjectIdentifier: (Channel, ChannelInfo)] = [:]
+    private var channels: [ObjectIdentifier: Channel] = [:]
     private let lock = DispatchQueue(label: "woo.sys.channels.controller.lock")
     
     /// 获取所有的连线 Channel
-    public var allChannels: [Channel] {
-        lock.sync {
-            channelInfos.values.map { $0.0 }
-        }
+    public var allChannels: [ObjectIdentifier: Channel].Values {
+        lock.sync { channels.values }
     }
     
     /// 支持字典语法，按 Channel 获取对应的 ChannelInfo，`app.channels[yourChannel]`
@@ -34,10 +33,12 @@ final public class Channels: StorageKey, @unchecked Sendable {
             if let info = newValue {
                 lock.sync {
                     channelInfos[identifier] = (channel, info)
+                    channels[ObjectIdentifier(info)] = channel
                 }
             } else {
                 lock.sync {
-                    let _ = channelInfos.removeValue(forKey: identifier)
+                    if let info = channelInfos[identifier]?.1 { _ = channels.removeValue(forKey: ObjectIdentifier(info)) }
+                    _ = channelInfos.removeValue(forKey: identifier)
                 }
             }
         }
@@ -52,6 +53,8 @@ final public class Channels: StorageKey, @unchecked Sendable {
         }
         return nil
     }
+    
+    public subscript(info: ChannelInfo) -> Channel? { channels[ObjectIdentifier(info)] }
     
     internal init() {}
     
@@ -72,7 +75,7 @@ final public class Channels: StorageKey, @unchecked Sendable {
     }
 }
 
-public final class ChannelInfo {
+public final class ChannelInfo: @unchecked Sendable {
     public internal(set) var upgraded: Bool = false
     public internal(set) var currentRequestID: String! = nil
     internal var serializeSegment: Int { upgraded ? 2 : 3 }

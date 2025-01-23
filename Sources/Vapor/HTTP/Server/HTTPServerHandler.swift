@@ -21,6 +21,7 @@ final class HTTPServerHandler: ChannelInboundHandler, RemovableChannelHandler {
         let box = NIOLoopBound((context, self), eventLoop: context.eventLoop)
         let request = self.unwrapInboundIn(data)
         app.channels[context.channel]!.currentRequestID = request.id
+        request.channel = context.channel
         // hop(to:) is required here to ensure we're on the correct event loop
         self.responder.respond(to: request).hop(to: context.eventLoop).whenComplete { response in
             let (context, handler) = box.value
