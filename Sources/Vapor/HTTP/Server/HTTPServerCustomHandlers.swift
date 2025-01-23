@@ -54,6 +54,12 @@ public protocol HTTPIOHandler: Sendable {
     ///     - info: 该连线的附加信息，包括是否为 WebSocket，以及当前请求的 ID
     /// - 返回：处理过后的响应数据 ByteBuffer
     func output(response: ByteBuffer, context: ChannelHandlerContext, info: ChannelInfo) throws -> ByteBuffer
+    
+    /// 当连线建立后，调用此方法，不提供 Info 参数，因为此时还未初始化该参数。默认不进行任何动作
+    func connectionStart(context: ChannelHandlerContext) throws
+    
+    /// 当连线将终止后，调用此方法。默认不进行任何动作
+    func connectionEnd(context: ChannelHandlerContext, info: ChannelInfo) throws
 }
 
 public extension HTTPIOHandler {
@@ -75,6 +81,10 @@ public extension HTTPIOHandler {
         let res = Data(buffer: response)
         return try dataToByteBuffer(data: output(response: res, context: context, info: info))
     }
+    
+    func connectionStart(context: ChannelHandlerContext) throws {}
+    
+    func connectionEnd(context: ChannelHandlerContext, info: ChannelInfo) throws {}
     
     private func dataToByteBuffer(data: Data) -> ByteBuffer {
         var buffer = ByteBufferAllocator().buffer(capacity: data.count)
@@ -108,7 +118,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler {
                 let req = try ioHandler.input(request: buffer, context: context, info: channelInfo)
                 context.fireChannelRead(self.wrapOutboundOut(req))
             } catch let err {
-                errorCaught(context: context, input: true, error: err)
+                errorCaught(context: context, label: "Input", error: err)
             }
         } else {
             context.fireChannelRead(data)
@@ -135,7 +145,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler {
                     let res = try ioHandler.output(response: res, context: context, info: channelInfo)
                     context.writeAndFlush(self.wrapOutboundOut(res), promise: promise)
                 } catch let err {
-                    errorCaught(context: context, input: false, error: err)
+                    errorCaught(context: context, label: "Output", error: err)
                 }
             }
         } else {
@@ -145,16 +155,26 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler {
     }
     
     func channelRegistered(context: ChannelHandlerContext) {
+        do {
+            try ioHandler?.connectionStart(context: context)
+        } catch let err {
+            errorCaught(context: context, label: "连线建立", error: err)
+        }
         app.channels[context.channel] = .init()
     }
     
     func channelUnregistered(context: ChannelHandlerContext) {
+        do {
+            try ioHandler?.connectionEnd(context: context, info: app.channels[context.channel]!)
+        } catch let err {
+            errorCaught(context: context, label: "连线终止", error: err)
+        }
         app.channels[context.channel] = nil
         context.fireChannelInactive()
     }
     
-    func errorCaught(context: ChannelHandlerContext, input: Bool, error: Error) {
-        self.logger.debug("\(input ? "Input" : "Output") HTTP 流加解密失败 \(String(reflecting: error))")
+    func errorCaught(context: ChannelHandlerContext, label: String, error: Error) {
+        self.logger.debug("HTTP 流 \(label) 时加解密失败: \(String(reflecting: error))")
         context.fireErrorCaught(error)
     }
 }
