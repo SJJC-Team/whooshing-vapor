@@ -9,12 +9,7 @@ public struct ClientRequest: Sendable {
     public var headers: HTTPHeaders
     public var body: ByteBuffer?
     public var timeout: TimeAmount?
-    public var channel: Channel? {
-        get { lock.withLock { self._channel } }
-        set { lock.withLock { self._channel = newValue } }
-    }
-    private var lock: NIOLock = .init()
-    private weak var _channel: Channel? = nil
+    public var channel: Channel?
     private let byteBufferAllocator: ByteBufferAllocator
 
     public init(
