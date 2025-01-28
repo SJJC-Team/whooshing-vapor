@@ -1,11 +1,18 @@
 import NIOCore
 import NIOHTTP1
 import Foundation
+import NIOConcurrencyHelpers
 
 public struct ClientResponse: Sendable {
     public var status: HTTPStatus
     public var headers: HTTPHeaders
     public var body: ByteBuffer?
+    public var channel: Channel? {
+        get { lock.withLock { self._channel } }
+        set { lock.withLock { self._channel = newValue } }
+    }
+    private var lock: NIOLock = .init()
+    private weak var _channel: Channel? = nil
     private let byteBufferAllocator: ByteBufferAllocator
 
     public init(status: HTTPStatus = .ok, headers: HTTPHeaders = [:], body: ByteBuffer? = nil, byteBufferAllocator: ByteBufferAllocator = ByteBufferAllocator()) {

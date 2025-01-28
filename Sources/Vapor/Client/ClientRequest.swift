@@ -1,6 +1,7 @@
 import NIOCore
 import NIOHTTP1
 import Foundation
+import NIOConcurrencyHelpers
 
 public struct ClientRequest: Sendable {
     public var method: HTTPMethod
@@ -8,6 +9,12 @@ public struct ClientRequest: Sendable {
     public var headers: HTTPHeaders
     public var body: ByteBuffer?
     public var timeout: TimeAmount?
+    public var channel: Channel? {
+        get { lock.withLock { self._channel } }
+        set { lock.withLock { self._channel = newValue } }
+    }
+    private var lock: NIOLock = .init()
+    private weak var _channel: Channel? = nil
     private let byteBufferAllocator: ByteBufferAllocator
 
     public init(
