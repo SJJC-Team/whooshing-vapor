@@ -28,7 +28,7 @@ public protocol HTTPIOHandler: Sendable {
     ///     - request: 从客户端发来的原始的未解密的请求数据 Data
     ///     - context: 该请求连线的上下文
     /// - 返回：解包过后的请求数据 Data，若返回 nil 则意味着捕获该请求，而不再进行后续处理
-    func input(request: Data, context: ChannelHandlerContext) async throws -> Data?
+    func input(request: Data, context: ChannelHandlerContext) -> EventLoopFuture<Data?>
     /// 当该服务器对客户端做出响应时，包装将要做出的响应。通常是进行加密操作，以保护响应不被窃取
     ///
     /// - 参数：
@@ -36,14 +36,14 @@ public protocol HTTPIOHandler: Sendable {
     ///     - context: 该请求连线的上下文，可以通过其获取对应的 Info，见下一个参数
     ///     - info: 该连线的附加信息，包括是否为 WebSocket，以及当前请求的 ID
     /// - 返回：处理过后的响应数据 Data，若返回 nil 则意味着捕获该请求，而不再进行后续处理
-    func output(response: Data, context: ChannelHandlerContext, info: ChannelInfo) async throws -> Data?
+    func output(response: Data, context: ChannelHandlerContext, info: ChannelInfo) -> EventLoopFuture<Data?>
     /// 当接受到请求时，解析传来的请求。通常是进行解密操作，以将密文转为下一步可解析的 HTTP 报文。免去 ByteBuffer 与 Data 互转的步骤，直接操作 ByteBuffer，更加轻量
     ///
     /// - 参数：
     ///     - request: 从客户端发来的原始的未解密的请求数据 ByteBuffer
     ///     - context: 该请求连线的上下文
     /// - 返回：解包过后的请求数据 ByteBuffer，若返回 nil 则意味着捕获该请求，而不再进行后续处理
-    func input(request: ByteBuffer, context: ChannelHandlerContext) async throws -> ByteBuffer?
+    func input(request: ByteBuffer, context: ChannelHandlerContext) -> EventLoopFuture<ByteBuffer?>
     /// 当该服务器对客户端做出响应时，包装将要做出的响应。通常是进行加密操作，以保护响应不被窃取。免去 ByteBuffer 与 Data 互转的步骤，直接操作 ByteBuffer，更加轻量
     ///
     /// - 参数：
@@ -51,44 +51,44 @@ public protocol HTTPIOHandler: Sendable {
     ///     - context: 该请求连线的上下文，可以通过其获取对应的 Info，见下一个参数
     ///     - info: 该连线的附加信息，包括是否为 WebSocket，以及当前请求的 ID
     /// - 返回：处理过后的响应数据 ByteBuffer，若返回 nil 则意味着捕获该请求，而不再进行后续处理
-    func output(response: ByteBuffer, context: ChannelHandlerContext, info: ChannelInfo) async throws -> ByteBuffer?
+    func output(response: ByteBuffer, context: ChannelHandlerContext, info: ChannelInfo) -> EventLoopFuture<ByteBuffer?>
     
     /// 当连线建立后，调用此方法，不提供 Info 参数，因为此时还未初始化该参数。默认不进行任何动作
-    func connectionStart(context: ChannelHandlerContext) async throws
+    func connectionStart(context: ChannelHandlerContext) -> EventLoopFuture<Void>
     
     /// 当连线将终止后，调用此方法。默认不进行任何动作
-    func connectionEnd(context: ChannelHandlerContext, info: ChannelInfo) async throws
+    func connectionEnd(context: ChannelHandlerContext, info: ChannelInfo) -> EventLoopFuture<Void>
 }
 
 public extension HTTPIOHandler {
     
     /// 默认不进行任何处理，直接将 request 作为返回值
-    func input(request: Data, context: ChannelHandlerContext) async throws -> Data? { request }
+    func input(request: Data, context: ChannelHandlerContext) -> EventLoopFuture<Data?> { context.eventLoop.makeSucceededFuture(request) }
     
     /// 默认不进行任何处理，直接将 response 作为返回值
-    func output(response: Data, context: ChannelHandlerContext, info: ChannelInfo) async throws -> Data? { response }
+    func output(response: Data, context: ChannelHandlerContext, info: ChannelInfo) -> EventLoopFuture<Data?> { context.eventLoop.makeSucceededFuture(response) }
     
     /// 默认调用 `func input(request: Data, context: ChannelHandlerContext, info: ChannelInfo)` 完成处理
-    func input(request: ByteBuffer, context: ChannelHandlerContext) async throws -> ByteBuffer? {
+    func input(request: ByteBuffer, context: ChannelHandlerContext) -> EventLoopFuture<ByteBuffer?> {
         let req = Data(buffer: request)
-        if let data = try await input(request: req, context: context) {
+        return input(request: req, context: context).map { reqData in
+            guard let data = reqData else { return nil }
             return dataToByteBuffer(data: data)
         }
-        return nil
     }
     
     /// 默认调用 `func output(response: Data, context: ChannelHandlerContext, info: ChannelInfo)` 完成处理
-    func output(response: ByteBuffer, context: ChannelHandlerContext, info: ChannelInfo) async throws -> ByteBuffer? {
+    func output(response: ByteBuffer, context: ChannelHandlerContext, info: ChannelInfo) -> EventLoopFuture<ByteBuffer?> {
         let res = Data(buffer: response)
-        if let data = try await output(response: res, context: context, info: info) {
+        return output(response: res, context: context, info: info).map { resData in
+            guard let data = resData else { return nil }
             return dataToByteBuffer(data: data)
         }
-        return nil
     }
     
-    func connectionStart(context: ChannelHandlerContext) async throws {}
+    func connectionStart(context: ChannelHandlerContext) -> EventLoopFuture<Void> { context.eventLoop.makeSucceededVoidFuture() }
     
-    func connectionEnd(context: ChannelHandlerContext, info: ChannelInfo) async throws {}
+    func connectionEnd(context: ChannelHandlerContext, info: ChannelInfo) -> EventLoopFuture<Void> { context.eventLoop.makeSucceededVoidFuture() }
     
     private func dataToByteBuffer(data: Data) -> ByteBuffer {
         var buffer = ByteBufferAllocator().buffer(capacity: data.count)
@@ -117,15 +117,13 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let buffer = self.unwrapInboundIn(data)
         if let ioHandler = self.ioHandler {
-            Task {
-                do {
-                    if let req = try await ioHandler.input(request: buffer, context: context) {
-                        context.fireChannelRead(self.wrapOutboundOut(req))
-                    }
-                } catch let err {
-                    errorCaught(context: context, label: "Input", error: err)
-                }
-            }
+            ioHandler.input(request: buffer, context: context).flatMap { req in
+                if let r = req { context.fireChannelRead(self.wrapOutboundOut(r)) }
+                return context.eventLoop.makeSucceededVoidFuture()
+            }.flatMapError { err in
+                self.errorCaught(context: context, label: "Input", error: err)
+                return context.eventLoop.makeSucceededVoidFuture()
+            }.whenComplete { _ in }
         } else {
             context.fireChannelRead(data)
         }
@@ -147,15 +145,13 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
                     res.writeBuffer(&bb)
                 }
                 i = 0
-                Task {
-                    do {
-                        if let res = try await ioHandler.output(response: res, context: context, info: channelInfo) {
-                            context.writeAndFlush(self.wrapOutboundOut(res), promise: promise)
-                        }
-                    } catch let err {
-                        errorCaught(context: context, label: "Output", error: err)
-                    }
-                }
+                ioHandler.output(response: res, context: context, info: channelInfo).flatMap { res in
+                    if let r = res { context.writeAndFlush(self.wrapOutboundOut(r), promise: promise) }
+                    return context.eventLoop.makeSucceededVoidFuture()
+                }.flatMapError { err in
+                    self.errorCaught(context: context, label: "Output", error: err)
+                    return context.eventLoop.makeSucceededVoidFuture()
+                }.whenComplete { _ in }
             }
         } else {
             bytes.removeAll()
@@ -164,32 +160,23 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
     }
     
     func channelRegistered(context: ChannelHandlerContext) {
-            let semaphore = DispatchSemaphore(value: 0)
-            Task {
-                do {
-                    try await ioHandler?.connectionStart(context: context)
-                } catch let err {
-                    errorCaught(context: context, label: "连线建立", error: err)
-                }
-                semaphore.signal()
-            }
-            semaphore.wait()
-        app.channels[context.channel] = .init()
+        guard let handler = ioHandler else { self.app.channels[context.channel] = .init(); return }
+        handler.connectionStart(context: context).flatMapError { err in
+            self.errorCaught(context: context, label: "连线建立", error: err)
+            return context.eventLoop.makeSucceededVoidFuture()
+        }.whenComplete { _ in self.app.channels[context.channel] = .init() }
     }
     
     func channelUnregistered(context: ChannelHandlerContext) {
-        let semaphore = DispatchSemaphore(value: 0)
-        Task {
-            do {
-                try await ioHandler?.connectionEnd(context: context, info: app.channels[context.channel]!)
-            } catch let err {
-                errorCaught(context: context, label: "连线终止", error: err)
-            }
-            semaphore.signal()
+        guard let handler = ioHandler else { end(); return }
+        handler.connectionEnd(context: context, info: app.channels[context.channel]!).flatMapError { err in
+            self.errorCaught(context: context, label: "连线终止", error: err)
+            return context.eventLoop.makeSucceededVoidFuture()
+        }.whenComplete { _ in end() }
+        @Sendable func end() {
+            app.channels[context.channel] = nil
+            context.fireChannelInactive()
         }
-        semaphore.wait()
-        app.channels[context.channel] = nil
-        context.fireChannelInactive()
     }
     
     func errorCaught(context: ChannelHandlerContext, label: String, error: Error) {
