@@ -161,6 +161,11 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
         }
     }
     
+    public func channelInactive(context: ChannelHandlerContext) {
+        print("channelInactive 被触发，连接真的关闭了")
+        context.fireChannelInactive()
+    }
+    
     func channelRegistered(context: ChannelHandlerContext) {
         guard let handler = ioHandler else { self.app.channels[context.channel] = .init(); return }
         handler.connectionStart(context: context).flatMapError { err in
