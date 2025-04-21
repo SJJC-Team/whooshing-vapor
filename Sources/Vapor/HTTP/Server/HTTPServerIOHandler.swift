@@ -122,7 +122,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
                 return context.eventLoop.makeSucceededVoidFuture()
             }.flatMapError { err in
                 self.errorCaught(context: context, label: "Input", error: err)
-                return context.eventLoop.makeSucceededVoidFuture()
+                return context.eventLoop.makeFailedFuture(err)
             }.whenComplete { _ in }
         } else {
             context.fireChannelRead(data)
@@ -150,7 +150,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
                     return context.eventLoop.makeSucceededVoidFuture()
                 }.flatMapError { err in
                     self.errorCaught(context: context, label: "Output", error: err)
-                    return context.eventLoop.makeSucceededVoidFuture()
+                    return context.eventLoop.makeFailedFuture(err)
                 }.whenComplete { _ in }
             }
         } else {
@@ -163,7 +163,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
         guard let handler = ioHandler else { self.app.channels[context.channel] = .init(); return }
         handler.connectionStart(context: context).flatMapError { err in
             self.errorCaught(context: context, label: "连线建立", error: err)
-            return context.eventLoop.makeSucceededVoidFuture()
+            return context.eventLoop.makeFailedFuture(err)
         }.whenComplete { _ in self.app.channels[context.channel] = .init() }
     }
     
@@ -171,7 +171,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
         guard let handler = ioHandler else { end(); return }
         handler.connectionEnd(context: context, info: app.channels[context.channel]!).flatMapError { err in
             self.errorCaught(context: context, label: "连线终止", error: err)
-            return context.eventLoop.makeSucceededVoidFuture()
+            return context.eventLoop.makeFailedFuture(err)
         }.whenComplete { _ in end() }
         @Sendable func end() {
             app.channels[context.channel] = nil
