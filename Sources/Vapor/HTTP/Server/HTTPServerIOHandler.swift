@@ -121,6 +121,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
                 if let r = req { context.fireChannelRead(self.wrapOutboundOut(r)) }
                 return context.eventLoop.makeSucceededVoidFuture()
             }.flatMapError { err in
+                print("error happend")
                 self.errorCaught(context: context, label: "Input", error: err)
                 return context.eventLoop.makeFailedFuture(err)
             }.whenComplete { _ in }
