@@ -150,6 +150,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
                     return context.eventLoop.makeSucceededVoidFuture()
                 }.flatMapError { err in
                     self.errorCaught(context: context, label: "Output", error: err)
+                    promise?.fail(err)
                     return context.eventLoop.makeFailedFuture(err)
                 }.whenComplete { _ in }
             }
