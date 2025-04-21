@@ -183,6 +183,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
     func errorCaught(context: ChannelHandlerContext, label: String, error: Error) {
         self.logger.debug("HTTP 流 \(label) 时加解密失败: \(String(reflecting: error))")
         context.fireErrorCaught(error)
+        context.channel.close(promise: nil)
     }
 }
 
