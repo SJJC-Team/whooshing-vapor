@@ -1,6 +1,7 @@
 import NIOCore
 import Logging
 import NIOHTTP1
+import Foundation
 
 public extension Application {
     /// 为 HTTP IO 流配置流处理，如果为 nil，则不进行任何处理
@@ -184,9 +185,13 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
     func errorHappend(context: ChannelHandlerContext, label: String, error: Error) {
         self.logger.debug("HTTP 流 \(label) 时加解密失败: \(String(reflecting: error))")
         
+        struct BodyReply: Content {
+            let error: Bool
+            let reason: String
+        }
 
         var headers = HTTPHeaders()
-        let body = context.channel.allocator.buffer(string: "{\"error\": true, \"reason\": \"\(error)\"}")
+        let body = try! ByteBuffer(data: JSONEncoder().encode(BodyReply(error: true, reason: "\(error)")))
         headers.add(name: "Content-Type", value: "application/json")
         headers.add(name: "Content-Length", value: "\(body.readableBytes)")
         headers.add(name: "Connection", value: "close")
@@ -198,10 +203,10 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
         )
 
         
-        let buffer = context.channel.allocator.buffer(string: httpResponseHeadToString(head))    
+        let buffer = ByteBuffer(string: httpResponseHeadToString(head))    
         context.write(self.wrapOutboundOut(buffer), promise: nil)
         context.write(self.wrapOutboundOut(body), promise: nil)
-        context.writeAndFlush(self.wrapOutboundOut(context.channel.allocator.buffer(string: ""))).whenComplete { _ in
+        context.writeAndFlush(self.wrapOutboundOut(ByteBuffer(bytes: []))).whenComplete { _ in
             context.close(promise: nil)
         }
 
@@ -213,7 +218,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
                 lines.append("\(name): \(value)")
             }
             lines.append("")
-            return lines.joined(separator: "\r\n")
+            return lines.joined(separator: "\r\n") + "\r\n"
         }
     }
 }
