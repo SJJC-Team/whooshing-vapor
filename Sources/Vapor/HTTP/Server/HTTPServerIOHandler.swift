@@ -123,7 +123,6 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
                 if let r = req { context.fireChannelRead(self.wrapOutboundOut(r)) }
                 return context.eventLoop.makeSucceededVoidFuture()
             }.flatMapError { err in
-                print("error happend")
                 self.errorHappend(context: context, label: "Input", error: err)
                 return context.eventLoop.makeFailedFuture(err)
             }.whenComplete { _ in }
@@ -184,29 +183,32 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
     
     func errorHappend(context: ChannelHandlerContext, label: String, error: Error) {
         self.logger.debug("HTTP 流 \(label) 时加解密失败: \(String(reflecting: error))")
-        
         struct BodyReply: Content {
             let error: Bool
             let reason: String
         }
 
-        var headers = HTTPHeaders()
-        let body = try! ByteBuffer(data: JSONEncoder().encode(BodyReply(error: true, reason: "\(error)")))
-        headers.add(name: "Content-Type", value: "application/json")
-        headers.add(name: "Content-Length", value: "\(body.readableBytes)")
-        headers.add(name: "Connection", value: "close")
+        if context.channel.isActive {
+            
+            var headers = HTTPHeaders()
+            let body = try! ByteBuffer(data: JSONEncoder().encode(BodyReply(error: true, reason: "\(error)")))
+            headers.add(name: "Content-Type", value: "application/json")
+            headers.add(name: "Content-Length", value: "\(body.readableBytes)")
+            headers.add(name: "Connection", value: "close")
 
-        let head = HTTPResponseHead(
-            version: .http1_1,
-            status: .internalServerError,
-            headers: headers
-        )
+            let head = HTTPResponseHead(
+                version: .http1_1,
+                status: .internalServerError,
+                headers: headers
+            )
 
-        
-        let buffer = ByteBuffer(string: httpResponseHeadToString(head))    
-        context.write(self.wrapOutboundOut(buffer), promise: nil)
-        context.write(self.wrapOutboundOut(body), promise: nil)
-        context.writeAndFlush(self.wrapOutboundOut(ByteBuffer(bytes: []))).whenComplete { _ in
+            let buffer = ByteBuffer(string: httpResponseHeadToString(head))    
+            context.write(self.wrapOutboundOut(buffer), promise: nil)
+            context.write(self.wrapOutboundOut(body), promise: nil)
+            context.writeAndFlush(self.wrapOutboundOut(ByteBuffer(bytes: []))).whenComplete { _ in
+                context.close(promise: nil)
+            }
+        } else {
             context.close(promise: nil)
         }
 
