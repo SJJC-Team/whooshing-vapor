@@ -1,5 +1,6 @@
 import NIOCore
 import Logging
+import NIOHTTP1
 
 public extension Application {
     /// 为 HTTP IO 流配置流处理，如果为 nil，则不进行任何处理
@@ -122,7 +123,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
                 return context.eventLoop.makeSucceededVoidFuture()
             }.flatMapError { err in
                 print("error happend")
-                self.errorCaught(context: context, label: "Input", error: err)
+                self.errorHappend(context: context, label: "Input", error: err)
                 return context.eventLoop.makeFailedFuture(err)
             }.whenComplete { _ in }
         } else {
@@ -150,8 +151,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
                     if let r = res { context.writeAndFlush(self.wrapOutboundOut(r), promise: promise) }
                     return context.eventLoop.makeSucceededVoidFuture()
                 }.flatMapError { err in
-                    self.errorCaught(context: context, label: "Output", error: err)
-                    promise?.fail(err)
+                    self.errorHappend(context: context, label: "Output", error: err)
                     return context.eventLoop.makeFailedFuture(err)
                 }.whenComplete { _ in }
             }
@@ -161,15 +161,10 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
         }
     }
     
-    public func channelInactive(context: ChannelHandlerContext) {
-        print("channelInactive 被触发，连接真的关闭了")
-        context.fireChannelInactive()
-    }
-    
     func channelRegistered(context: ChannelHandlerContext) {
         guard let handler = ioHandler else { self.app.channels[context.channel] = .init(); return }
         handler.connectionStart(context: context).flatMapError { err in
-            self.errorCaught(context: context, label: "连线建立", error: err)
+            self.errorHappend(context: context, label: "连线建立", error: err)
             return context.eventLoop.makeFailedFuture(err)
         }.whenComplete { _ in self.app.channels[context.channel] = .init() }
     }
@@ -177,7 +172,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
     func channelUnregistered(context: ChannelHandlerContext) {
         guard let handler = ioHandler else { end(); return }
         handler.connectionEnd(context: context, info: app.channels[context.channel]!).flatMapError { err in
-            self.errorCaught(context: context, label: "连线终止", error: err)
+            self.errorHappend(context: context, label: "连线终止", error: err)
             return context.eventLoop.makeFailedFuture(err)
         }.whenComplete { _ in end() }
         @Sendable func end() {
@@ -186,10 +181,27 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
         }
     }
     
-    func errorCaught(context: ChannelHandlerContext, label: String, error: Error) {
+    func errorHappend(context: ChannelHandlerContext, label: String, error: Error) {
         self.logger.debug("HTTP 流 \(label) 时加解密失败: \(String(reflecting: error))")
-        context.fireErrorCaught(error)
-        context.close(promise: nil)
+        
+        var headers = HTTPHeaders()
+        let body = context.channel.allocator.buffer(string: "{\"error\": true, \"reason\": \"\(error)\"}")
+        headers.add(name: "Content-Type", value: "application/json")
+        headers.add(name: "Content-Length", value: "\(body.readableBytes)")
+        headers.add(name: "Connection", value: "close")
+
+        let head = HTTPResponseHead(
+            version: .http1_1,
+            status: .internalServerError,
+            headers: headers
+        )
+        
+        let buffer = context.channel.allocator.buffer(string: head.description)    
+        context.write(self.wrapOutboundOut(buffer), promise: nil)
+        context.write(self.wrapOutboundOut(body), promise: nil)
+        context.writeAndFlush(self.wrapOutboundOut(context.channel.allocator.buffer(string: ""))).whenComplete { _ in
+            context.close(promise: nil)
+        }
     }
 }
 

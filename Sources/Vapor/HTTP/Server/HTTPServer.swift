@@ -432,8 +432,7 @@ private final class HTTPServerConnection: Sendable {
             .childChannelInitializer { [unowned application, unowned server] channel in
                 /// Copy the most up-to-date configuration.
                 let configuration = server.configuration
-                    /// 如果设置了 http IO 加密，则进行加密，否则无事发生
-                let c = channel.pipeline.addHandler(CustomCryptoIOHandler(app: application, ioHandler: application.httpIOHandler))
+
                 /// Add TLS handlers if configured.
                 if var tlsConfiguration = configuration.tlsConfiguration {
                     /// Prioritize http/2 if supported.
@@ -452,7 +451,7 @@ private final class HTTPServerConnection: Sendable {
                         configuration.logger.error("Could not configure TLS: \(error)")
                         return channel.close(mode: .all)
                     }
-                    return c.flatMap { _ in channel.pipeline.addHandler(tlsHandler).flatMap { _ in
+                    return channel.pipeline.addHandler(tlsHandler).flatMap { _ in
                         channel.configureHTTP2SecureUpgrade(h2ChannelConfigurator: { channel in
                             channel.configureHTTP2Pipeline(
                                 mode: .server,
@@ -471,16 +470,16 @@ private final class HTTPServerConnection: Sendable {
                                 configuration: configuration
                             )
                         })
-                    }}
+                    }
                 } else {
                     guard !configuration.supportVersions.contains(.two) else {
                         fatalError("Plaintext HTTP/2 (h2c) not yet supported.")
                     }
-                    return c.flatMap { channel.pipeline.addVaporHTTP1Handlers(
+                    return channel.pipeline.addVaporHTTP1Handlers(
                         application: application,
                         responder: responder,
                         configuration: configuration
-                    )}
+                    )
                 }
             }
             
@@ -546,6 +545,9 @@ extension ChannelPipeline {
     ) -> EventLoopFuture<Void> {
         /// Create server pipeline array.
         var handlers: [ChannelHandler] = []
+
+        /// 如果设置了 http IO 加密，则进行加密，否则无事发生
+        let c = CustomCryptoIOHandler(app: application, ioHandler: application.httpIOHandler)
         
         let http2 = HTTP2FramePayloadToHTTP1ServerCodec()
         handlers.append(http2)
@@ -581,9 +583,11 @@ extension ChannelPipeline {
         let handler = HTTPServerHandler(responder: responder, logger: application.logger, app: application)
         handlers.append(handler)
         
-        return self.addHandlers(handlers).flatMap {
-            /// Close the connection in case of any errors.
-            self.addHandler(NIOCloseOnErrorHandler())
+        return self.addHandler(c).flatMap {
+            self.addHandlers(handlers).flatMap {
+                /// Close the connection in case of any errors.
+                self.addHandler(NIOCloseOnErrorHandler())
+            }
         }
     }
     
@@ -595,6 +599,9 @@ extension ChannelPipeline {
         /// Create server pipeline array.
         var handlers: [RemovableChannelHandler] = []
         
+        /// 如果设置了 http IO 加密，则进行加密，否则无事发生
+        let c = CustomCryptoIOHandler(app: application, ioHandler: application.httpIOHandler)
+
         /// Configure HTTP/1:
         /// Add http parsing and serializing.
         let httpResEncoder = HTTPResponseEncoder()
@@ -648,9 +655,11 @@ extension ChannelPipeline {
         handlers.append(upgrader)
         handlers.append(handler)
         
-        return self.addHandlers(handlers).flatMap {
-            /// Close the connection in case of any errors.
-            self.addHandler(NIOCloseOnErrorHandler())
+        return self.addHandler(c).flatMap { 
+            self.addHandlers(handlers).flatMap {
+                /// Close the connection in case of any errors.
+                self.addHandler(NIOCloseOnErrorHandler())
+            }
         }
     }
 }
