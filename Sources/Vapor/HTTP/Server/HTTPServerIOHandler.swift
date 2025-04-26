@@ -184,6 +184,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
     func errorHappend(context: ChannelHandlerContext, label: String, error: Error) {
         self.logger.debug("HTTP 流 \(label) 时加解密失败: \(String(reflecting: error))")
         
+
         var headers = HTTPHeaders()
         let body = context.channel.allocator.buffer(string: "{\"error\": true, \"reason\": \"\(error)\"}")
         headers.add(name: "Content-Type", value: "application/json")
@@ -195,12 +196,24 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
             status: .internalServerError,
             headers: headers
         )
+
         
-        let buffer = context.channel.allocator.buffer(string: head.description)    
+        let buffer = context.channel.allocator.buffer(string: httpResponseHeadToString(head))    
         context.write(self.wrapOutboundOut(buffer), promise: nil)
         context.write(self.wrapOutboundOut(body), promise: nil)
         context.writeAndFlush(self.wrapOutboundOut(context.channel.allocator.buffer(string: ""))).whenComplete { _ in
             context.close(promise: nil)
+        }
+
+        func httpResponseHeadToString(_ head: HTTPResponseHead) -> String {
+            var lines: [String] = []
+            let statusLine = "HTTP/\(head.version.major).\(head.version.minor) \(head.status.code) \(head.status.reasonPhrase)"
+            lines.append(statusLine)
+            for (name, value) in head.headers {
+                lines.append("\(name): \(value)")
+            }
+            lines.append("")
+            return lines.joined(separator: "\r\n")
         }
     }
 }
