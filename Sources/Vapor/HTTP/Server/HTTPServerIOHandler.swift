@@ -185,7 +185,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
     }
     
     func errorHappend(context: ChannelHandlerContext, label: String, error: Error) {
-        self.logger.error("HTTP 流 \(label) 时加解密失败: \(String(reflecting: error))")
+        self.logger.report(error: error)
         struct BodyReply: Content {
             let error: Bool
             let reason: String
