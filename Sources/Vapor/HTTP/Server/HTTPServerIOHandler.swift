@@ -119,13 +119,16 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let buffer = self.unwrapInboundIn(data)
         if let ioHandler = self.ioHandler {
-            ioHandler.input(request: buffer, context: context).flatMap { req in
-                if let r = req { context.fireChannelRead(self.wrapOutboundOut(r)) }
-                return context.eventLoop.makeSucceededVoidFuture()
-            }.flatMapError { err in
-                self.errorHappend(context: context, label: "Input", error: err)
-                return context.eventLoop.makeFailedFuture(err)
-            }.whenComplete { _ in }
+            ioHandler.input(request: buffer, context: context).whenComplete { result in
+                switch result {
+                case .success(let req):
+                    if let req = req {
+                        context.fireChannelRead(self.wrapOutboundOut(req))
+                    }
+                case .failure(let err):
+                    self.errorHappend(context: context, label: "Input", error: err)
+                }
+            }
         } else {
             context.fireChannelRead(data)
         }
@@ -182,7 +185,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
     }
     
     func errorHappend(context: ChannelHandlerContext, label: String, error: Error) {
-        self.logger.debug("HTTP 流 \(label) 时加解密失败: \(String(reflecting: error))")
+        self.logger.error("HTTP 流 \(label) 时加解密失败: \(String(reflecting: error))")
         struct BodyReply: Content {
             let error: Bool
             let reason: String
