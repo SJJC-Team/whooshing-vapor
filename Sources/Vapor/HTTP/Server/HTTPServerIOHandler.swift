@@ -29,31 +29,37 @@ public protocol HTTPIOHandler: Sendable {
     /// - 参数：
     ///     - request: 从客户端发来的原始的未解密的请求数据 Data
     ///     - context: 该请求连线的上下文
+    ///     - streaming: 表示当前数据正在分片传送中，尚未完成
     /// - 返回：解包过后的请求数据 Data，若返回 nil 则意味着捕获该请求，而不再进行后续处理
-    func input(request: Data, context: ChannelHandlerContext) -> EventLoopFuture<Data?>
+    /// - 注意：当 streaming 为 true 时，不会考虑您的返回值，无论其为 nil 或 Data
+    func input(request: Data, context: ChannelHandlerContext, streaming: Bool) -> EventLoopFuture<Data?>
     /// 当该服务器对客户端做出响应时，包装将要做出的响应。通常是进行加密操作，以保护响应不被窃取
     ///
     /// - 参数：
     ///     - request: 服务器将要发送给客户端的响应数据 Data
     ///     - context: 该请求连线的上下文，可以通过其获取对应的 Info，见下一个参数
     ///     - info: 该连线的附加信息，包括是否为 WebSocket，以及当前请求的 ID
-    /// - 返回：处理过后的响应数据 Data，若返回 nil 则意味着捕获该请求，而不再进行后续处理
-    func output(response: Data, context: ChannelHandlerContext, info: ChannelInfo) -> EventLoopFuture<Data?>
+    ///     - streaming: 表示当前数据正在分片传送中，尚未完成
+    /// - 返回：处理过后的响应数据 Data
+    func output(response: Data, context: ChannelHandlerContext, info: ChannelInfo, streaming: Bool) -> EventLoopFuture<Data>
     /// 当接受到请求时，解析传来的请求。通常是进行解密操作，以将密文转为下一步可解析的 HTTP 报文。免去 ByteBuffer 与 Data 互转的步骤，直接操作 ByteBuffer，更加轻量
     ///
     /// - 参数：
     ///     - request: 从客户端发来的原始的未解密的请求数据 ByteBuffer
     ///     - context: 该请求连线的上下文
+    ///     - streaming: 表示当前数据正在分片传送中，尚未完成
     /// - 返回：解包过后的请求数据 ByteBuffer，若返回 nil 则意味着捕获该请求，而不再进行后续处理
-    func input(request: ByteBuffer, context: ChannelHandlerContext) -> EventLoopFuture<ByteBuffer?>
+    /// - 注意：当 streaming 为 true 时，不会考虑您的返回值，无论其为 nil 或 Data
+    func input(request: ByteBuffer, context: ChannelHandlerContext, streaming: Bool) -> EventLoopFuture<ByteBuffer?>
     /// 当该服务器对客户端做出响应时，包装将要做出的响应。通常是进行加密操作，以保护响应不被窃取。免去 ByteBuffer 与 Data 互转的步骤，直接操作 ByteBuffer，更加轻量
     ///
     /// - 参数：
     ///     - request: 服务器将要发送给客户端的响应数据 ByteBuffer
     ///     - context: 该请求连线的上下文，可以通过其获取对应的 Info，见下一个参数
     ///     - info: 该连线的附加信息，包括是否为 WebSocket，以及当前请求的 ID
-    /// - 返回：处理过后的响应数据 ByteBuffer，若返回 nil 则意味着捕获该请求，而不再进行后续处理
-    func output(response: ByteBuffer, context: ChannelHandlerContext, info: ChannelInfo) -> EventLoopFuture<ByteBuffer?>
+    ///     - streaming: 表示当前数据正在分片传送中，尚未完成
+    /// - 返回：处理过后的响应数据 ByteBuffer
+    func output(response: ByteBuffer, context: ChannelHandlerContext, info: ChannelInfo, streaming: Bool) -> EventLoopFuture<ByteBuffer>
     
     /// 当连线建立后，调用此方法，不提供 Info 参数，因为此时还未初始化该参数。默认不进行任何动作
     func connectionStart(context: ChannelHandlerContext) -> EventLoopFuture<Void>
@@ -65,26 +71,25 @@ public protocol HTTPIOHandler: Sendable {
 public extension HTTPIOHandler {
     
     /// 默认不进行任何处理，直接将 request 作为返回值
-    func input(request: Data, context: ChannelHandlerContext) -> EventLoopFuture<Data?> { context.eventLoop.makeSucceededFuture(request) }
+    func input(request: Data, context: ChannelHandlerContext, streaming: Bool) -> EventLoopFuture<Data?> { context.eventLoop.makeSucceededFuture(request) }
     
     /// 默认不进行任何处理，直接将 response 作为返回值
-    func output(response: Data, context: ChannelHandlerContext, info: ChannelInfo) -> EventLoopFuture<Data?> { context.eventLoop.makeSucceededFuture(response) }
+    func output(response: Data, context: ChannelHandlerContext, info: ChannelInfo, streaming: Bool) -> EventLoopFuture<Data> { context.eventLoop.makeSucceededFuture(response) }
     
     /// 默认调用 `func input(request: Data, context: ChannelHandlerContext, info: ChannelInfo)` 完成处理
-    func input(request: ByteBuffer, context: ChannelHandlerContext) -> EventLoopFuture<ByteBuffer?> {
+    func input(request: ByteBuffer, context: ChannelHandlerContext, streaming: Bool) -> EventLoopFuture<ByteBuffer?> {
         let req = Data(buffer: request)
-        return input(request: req, context: context).map { reqData in
+        return input(request: req, context: context, streaming: streaming).map { reqData in
             guard let data = reqData else { return nil }
             return dataToByteBuffer(data: data)
         }
     }
     
     /// 默认调用 `func output(response: Data, context: ChannelHandlerContext, info: ChannelInfo)` 完成处理
-    func output(response: ByteBuffer, context: ChannelHandlerContext, info: ChannelInfo) -> EventLoopFuture<ByteBuffer?> {
+    func output(response: ByteBuffer, context: ChannelHandlerContext, info: ChannelInfo, streaming: Bool) -> EventLoopFuture<ByteBuffer> {
         let res = Data(buffer: response)
-        return output(response: res, context: context, info: info).map { resData in
-            guard let data = resData else { return nil }
-            return dataToByteBuffer(data: data)
+        return output(response: res, context: context, info: info, streaming: streaming).map { resData in
+            return dataToByteBuffer(data: resData)
         }
     }
     
@@ -100,9 +105,11 @@ public extension HTTPIOHandler {
 }
 
 public struct ChunkTool {
-    public static var maxChunk: Int { 512 * 1024 * 1024 }
+    public static var maxChunk: Int { 2048 }
 
     public static var maxChunkStr: String { formatByteSize(maxChunk) }
+
+    public static let eof = ByteBuffer(string: "EOF")
 
     public static func formatByteSize(_ bytes: Int) -> String {
         let units = ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB"]
@@ -119,6 +126,14 @@ public struct ChunkTool {
     }
 
     public static func isProperSize(bytes: Int) -> Bool { bytes <= maxChunk }
+
+    public static func concatenateBuffers(_ buffer1: inout ByteBuffer, _ buffer2: inout ByteBuffer) -> ByteBuffer {
+        let totalSize = buffer1.readableBytes + buffer2.readableBytes
+        var resultBuffer = ByteBufferAllocator().buffer(capacity: totalSize)
+        resultBuffer.writeBuffer(&buffer1)
+        resultBuffer.writeBuffer(&buffer2)
+        return resultBuffer
+    }
 }
 
 final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sendable {
@@ -139,31 +154,33 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
     }
     
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
-        let buffer = self.unwrapInboundIn(data)
-        print("读取到的字节数：\(buffer.readableBytes)")
-        if let ioHandler = self.ioHandler {
-            ioHandler.input(request: buffer, context: context).whenComplete { result in
-                switch result {
-                case .success(let req):
-                    if let req = req {
-                        context.fireChannelRead(self.wrapOutboundOut(req))
-                    }
-                case .failure(let err):
-                    self.errorHappend(context: context, label: "Input", error: err)
+        var buffer = self.unwrapInboundIn(data)
+        guard let ioHandler = self.ioHandler else { context.fireChannelRead(data); return }
+        let streaming: Bool
+        if let bufferSuffix = buffer.readSlice(length: ChunkTool.eof.readableBytes) { 
+            streaming = bufferSuffix != ChunkTool.eof 
+        } 
+        else { streaming = true }
+        if streaming { buffer.moveReaderIndex(to: 0) }
+
+        ioHandler.input(request: buffer, context: context, streaming: streaming).whenComplete { result in
+            switch result {
+            case .success(let req):
+                if !streaming, let req = req {
+                    context.fireChannelRead(self.wrapOutboundOut(req))
                 }
+            case .failure(let err):
+                self.errorHappend(context: context, label: "Input", error: err)
             }
-        } else {
-            context.fireChannelRead(data)
         }
     }
     
     func write(context: ChannelHandlerContext, data: NIOAny, promise: EventLoopPromise<Void>?) {
         let buffer = self.unwrapOutboundIn(data)
         let channelInfo = app.channels[context.channel]!
-        if let ioHandler = self.ioHandler {
+        if let _ = self.ioHandler {
             bytes.append(buffer)
             i += 1
-            print("\(i): \(buffer.readableBytes)")
             if i == channelInfo.serializeSegment {
                 defer {
                     bytes.removeAll()
@@ -174,25 +191,46 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
                     res.writeBuffer(&bb)
                 }
                 i = 0
-                guard ChunkTool.isProperSize(bytes: res.readableBytes) else { 
-                    promise?.fail(HTTPParserError.invalidChunkSize)
-                    errorHappend(context: context, label: "请求过大，超过 \(ChunkTool.maxChunkStr), 实际为 \(ChunkTool.formatByteSize(buffer.readableBytes))", error: HTTPParserError.invalidChunkSize)
-                    return
+                let r = sendWithChunk(data: &res)
+                if let p = promise {
+                    r.cascade(to: p)
                 }
-                ioHandler.output(response: res, context: context, info: channelInfo).flatMap { res in
-                    if let r = res { context.writeAndFlush(self.wrapOutboundOut(r), promise: promise) }
-                    return context.eventLoop.makeSucceededVoidFuture()
-                }.flatMapError { err in
-                    self.errorHappend(context: context, label: "Output", error: err)
-                    return context.eventLoop.makeFailedFuture(err)
-                }.whenComplete { _ in }
             }
         } else {
             bytes.removeAll()
             context.writeAndFlush(data, promise: promise)
         }
+
+        func sendWithChunk(data: inout ByteBuffer) -> EventLoopFuture<Void> {
+            guard let ioHandler = self.ioHandler, data.readableBytes > 0 else { return context.eventLoop.makeSucceededVoidFuture() }
+            var r = context.eventLoop.makeSucceededVoidFuture()
+            while data.readableBytes > 0 {
+                guard let chunk = data.readSlice(length: min(ChunkTool.maxChunk, data.readableBytes)) else { break }
+                let eof = data.readableBytes == 0
+                r = r.flatMap {
+                    send(chunk: chunk, streaming: !eof)
+                }
+            }
+            
+            return r.flatMapError { err in
+                self.errorHappend(context: context, label: "Output", error: err)
+                return context.eventLoop.makeFailedFuture(err)
+            }
+
+            @Sendable
+            func send(chunk: ByteBuffer, streaming: Bool) -> EventLoopFuture<Void> {
+                ioHandler.output(response: chunk, context: context, info: channelInfo, streaming: streaming).flatMap { res in
+                    if !streaming {
+                        var r = res
+                        var eof = ChunkTool.eof
+                        return context.writeAndFlush(self.wrapOutboundOut(ChunkTool.concatenateBuffers(&eof, &r))) 
+                    }
+                    return context.writeAndFlush(self.wrapOutboundOut(res))
+                }
+            }
+        }
     }
-    
+
     func channelRegistered(context: ChannelHandlerContext) {
         guard let handler = ioHandler else { self.app.channels[context.channel] = .init(); return }
         handler.connectionStart(context: context).flatMapError { err in
@@ -223,7 +261,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
         if context.channel.isActive {
             
             var headers = HTTPHeaders()
-            let body = try! ByteBuffer(data: JSONEncoder().encode(BodyReply(error: true, reason: "\(error)")))
+            var body = try! ByteBuffer(data: JSONEncoder().encode(BodyReply(error: true, reason: "\(error)")))
             headers.add(name: "Content-Type", value: "application/json")
             headers.add(name: "Content-Length", value: "\(body.readableBytes)")
             headers.add(name: "Connection", value: "close")
@@ -234,10 +272,11 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
                 headers: headers
             )
 
-            let buffer = ByteBuffer(string: httpResponseHeadToString(head))    
-            context.write(self.wrapOutboundOut(buffer), promise: nil)
-            context.write(self.wrapOutboundOut(body), promise: nil)
-            context.writeAndFlush(self.wrapOutboundOut(ByteBuffer(bytes: []))).whenComplete { _ in
+            var buffer = ChunkTool.eof
+            buffer.writeString(httpResponseHeadToString(head))
+            buffer.writeBuffer(&body)
+            buffer.writeBytes([])
+            context.writeAndFlush(self.wrapOutboundOut(buffer)).whenComplete { _ in
                 context.close(promise: nil)
             }
         } else {
