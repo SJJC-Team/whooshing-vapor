@@ -546,8 +546,7 @@ extension ChannelPipeline {
         /// Create server pipeline array.
         var handlers: [ChannelHandler] = []
 
-        /// 如果设置了 http IO 加密，则进行加密，否则无事发生
-        let c = CustomCryptoIOHandler(app: application, ioHandler: application.httpIOHandler)
+        let customHandlers = makeCustomHandlers(application: application)
         
         let http2 = HTTP2FramePayloadToHTTP1ServerCodec()
         handlers.append(http2)
@@ -583,7 +582,7 @@ extension ChannelPipeline {
         let handler = HTTPServerHandler(responder: responder, logger: application.logger, app: application)
         handlers.append(handler)
         
-        return self.addHandler(c).flatMap {
+        return self.addHandlers(customHandlers).flatMap {
             self.addHandlers(handlers).flatMap {
                 /// Close the connection in case of any errors.
                 self.addHandler(NIOCloseOnErrorHandler())
@@ -599,8 +598,7 @@ extension ChannelPipeline {
         /// Create server pipeline array.
         var handlers: [RemovableChannelHandler] = []
         
-        /// 如果设置了 http IO 加密，则进行加密，否则无事发生
-        let c = CustomCryptoIOHandler(app: application, ioHandler: application.httpIOHandler)
+        let customHandlers = makeCustomHandlers(application: application)
 
         /// Configure HTTP/1:
         /// Add http parsing and serializing.
@@ -655,12 +653,27 @@ extension ChannelPipeline {
         handlers.append(upgrader)
         handlers.append(handler)
         
-        return self.addHandler(c).flatMap { 
+        return self.addHandlers(customHandlers).flatMap { 
             self.addHandlers(handlers).flatMap {
                 /// Close the connection in case of any errors.
                 self.addHandler(NIOCloseOnErrorHandler())
             }
         }
+    }
+
+    func makeCustomHandlers(application: Application) -> [ChannelHandler] {
+        var res: [ChannelHandler] = []
+        if let _ = application.httpIOHandler {
+            // 对 TCP 粘包和拆包的处理，非流式传输
+            let frameEncoderHandler = LengthFieldPrepender(lengthFieldLength: .eight, lengthFieldEndianness: .big)
+            let frameDecoderHandler = ByteToMessageHandler(LengthFieldBasedFrameDecoder(lengthFieldLength: .eight, lengthFieldEndianness: .big))
+            res.append(frameEncoderHandler)
+            res.append(frameDecoderHandler)
+        }
+        // Whooshing 加密处理器
+        let cryptoHandler = CustomCryptoIOHandler(app: application, ioHandler: application.httpIOHandler)
+        res.append(cryptoHandler)
+        return res
     }
 }
 

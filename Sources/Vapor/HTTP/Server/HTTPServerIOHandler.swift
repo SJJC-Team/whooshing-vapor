@@ -99,6 +99,28 @@ public extension HTTPIOHandler {
     }
 }
 
+public struct ChunkTool {
+    public static var maxChunk: Int { 512 * 1024 * 1024 }
+
+    public static var maxChunkStr: String { formatByteSize(maxChunk) }
+
+    public static func formatByteSize(_ bytes: Int) -> String {
+        let units = ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB"]
+        
+        var size = Double(bytes)
+        var unitIndex = 0
+        
+        while size >= 1024 && unitIndex < units.count - 1 {
+            size /= 1024
+            unitIndex += 1
+        }
+        
+        return String(format: "%.2f %@", size, units[unitIndex])
+    }
+
+    public static func isProperSize(bytes: Int) -> Bool { bytes <= maxChunk }
+}
+
 final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sendable {
     typealias InboundIn = ByteBuffer
     typealias OutboundIn = ByteBuffer
@@ -118,6 +140,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
     
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let buffer = self.unwrapInboundIn(data)
+        print("读取到的字节数：\(buffer.readableBytes)")
         if let ioHandler = self.ioHandler {
             ioHandler.input(request: buffer, context: context).whenComplete { result in
                 switch result {
@@ -140,6 +163,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
         if let ioHandler = self.ioHandler {
             bytes.append(buffer)
             i += 1
+            print("\(i): \(buffer.readableBytes)")
             if i == channelInfo.serializeSegment {
                 defer {
                     bytes.removeAll()
@@ -150,6 +174,11 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
                     res.writeBuffer(&bb)
                 }
                 i = 0
+                guard ChunkTool.isProperSize(bytes: res.readableBytes) else { 
+                    promise?.fail(HTTPParserError.invalidChunkSize)
+                    errorHappend(context: context, label: "请求过大，超过 \(ChunkTool.maxChunkStr), 实际为 \(ChunkTool.formatByteSize(buffer.readableBytes))", error: HTTPParserError.invalidChunkSize)
+                    return
+                }
                 ioHandler.output(response: res, context: context, info: channelInfo).flatMap { res in
                     if let r = res { context.writeAndFlush(self.wrapOutboundOut(r), promise: promise) }
                     return context.eventLoop.makeSucceededVoidFuture()
@@ -201,7 +230,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
 
             let head = HTTPResponseHead(
                 version: .http1_1,
-                status: .internalServerError,
+                status: ((error as? HTTPParserError) == .invalidChunkSize) ? .payloadTooLarge : .internalServerError,
                 headers: headers
             )
 
