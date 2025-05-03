@@ -105,7 +105,7 @@ public extension HTTPIOHandler {
 }
 
 public struct ChunkTool {
-    public static var maxChunk: Int { 8192 }
+    public static var maxChunk: Int { 65536 } // 64 kB
 
     public static var maxChunkStr: String { formatByteSize(maxChunk) }
 
