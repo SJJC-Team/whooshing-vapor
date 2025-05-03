@@ -105,7 +105,7 @@ public extension HTTPIOHandler {
 }
 
 public struct ChunkTool {
-    public static var maxChunk: Int { 2048 }
+    public static var maxChunk: Int { 8192 }
 
     public static var maxChunkStr: String { formatByteSize(maxChunk) }
 
@@ -145,7 +145,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
     let ioHandler: HTTPIOHandler?
     let app: Application
     
-    private var bytes: [ByteBuffer] = []
+    private var buffers: [ByteBuffer] = []
     private var i = 0
     
     init(app: Application, ioHandler: HTTPIOHandler?) {
@@ -162,11 +162,10 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
         } 
         else { streaming = true }
         if streaming { buffer.moveReaderIndex(to: 0) }
-
         ioHandler.input(request: buffer, context: context, streaming: streaming).whenComplete { result in
             switch result {
             case .success(let req):
-                if !streaming, let req = req {
+                if let req = req {
                     context.fireChannelRead(self.wrapOutboundOut(req))
                 }
             case .failure(let err):
@@ -179,30 +178,29 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
         let buffer = self.unwrapOutboundIn(data)
         let channelInfo = app.channels[context.channel]!
         if let _ = self.ioHandler {
-            bytes.append(buffer)
+            buffers.append(buffer)
             i += 1
             if i == channelInfo.serializeSegment {
-                defer {
-                    bytes.removeAll()
+                let r = send(chunk: buffers[0], streaming: true).flatMap {
+                    var res = ByteBufferAllocator().buffer(capacity: 0)
+                    for b in self.buffers[1..<self.buffers.count] {
+                        var bb = b
+                        res.writeBuffer(&bb)
+                    }
+                    return sendWithChunk(data: &res).map {
+                        self.i = 0
+                        self.buffers.removeAll()
+                    }
                 }
-                var res = ByteBufferAllocator().buffer(capacity: 0)
-                for b in bytes {
-                    var bb = b
-                    res.writeBuffer(&bb)
-                }
-                i = 0
-                let r = sendWithChunk(data: &res)
-                if let p = promise {
-                    r.cascade(to: p)
-                }
+                if let p = promise { r.cascade(to: p) }
             }
         } else {
-            bytes.removeAll()
+            buffers.removeAll()
             context.writeAndFlush(data, promise: promise)
         }
 
+        @Sendable
         func sendWithChunk(data: inout ByteBuffer) -> EventLoopFuture<Void> {
-            guard let ioHandler = self.ioHandler, data.readableBytes > 0 else { return context.eventLoop.makeSucceededVoidFuture() }
             var r = context.eventLoop.makeSucceededVoidFuture()
             while data.readableBytes > 0 {
                 guard let chunk = data.readSlice(length: min(ChunkTool.maxChunk, data.readableBytes)) else { break }
@@ -216,17 +214,18 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
                 self.errorHappend(context: context, label: "Output", error: err)
                 return context.eventLoop.makeFailedFuture(err)
             }
+        }
 
-            @Sendable
-            func send(chunk: ByteBuffer, streaming: Bool) -> EventLoopFuture<Void> {
-                ioHandler.output(response: chunk, context: context, info: channelInfo, streaming: streaming).flatMap { res in
-                    if !streaming {
-                        var r = res
-                        var eof = ChunkTool.eof
-                        return context.writeAndFlush(self.wrapOutboundOut(ChunkTool.concatenateBuffers(&eof, &r))) 
-                    }
-                    return context.writeAndFlush(self.wrapOutboundOut(res))
+        @Sendable
+        func send(chunk: ByteBuffer, streaming: Bool) -> EventLoopFuture<Void> {
+            guard let ioHandler = self.ioHandler else { return context.eventLoop.makeSucceededVoidFuture() }
+            return ioHandler.output(response: chunk, context: context, info: channelInfo, streaming: streaming).flatMap { res in
+                if !streaming {
+                    var r = res
+                    var eof = ChunkTool.eof
+                    return context.writeAndFlush(self.wrapOutboundOut(ChunkTool.concatenateBuffers(&eof, &r))) 
                 }
+                return context.writeAndFlush(self.wrapOutboundOut(res))
             }
         }
     }
@@ -259,7 +258,6 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
         }
 
         if context.channel.isActive {
-            
             var headers = HTTPHeaders()
             var body = try! ByteBuffer(data: JSONEncoder().encode(BodyReply(error: true, reason: "\(error)")))
             headers.add(name: "Content-Type", value: "application/json")
