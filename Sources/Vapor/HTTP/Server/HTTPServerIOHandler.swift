@@ -142,20 +142,19 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
     typealias OutboundOut = ByteBuffer
     
     var logger: Logger { app.logger }
-    let ioHandler: HTTPIOHandler?
+    let ioHandler: HTTPIOHandler
     let app: Application
     
-    private var buffers: [ByteBuffer] = []
-    private var i = 0
-    
-    init(app: Application, ioHandler: HTTPIOHandler?) {
+    private var headerSent = false
+    private var i: Int = 0
+
+    init(app: Application, ioHandler: HTTPIOHandler) {
         self.app = app
         self.ioHandler = ioHandler
     }
     
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         var buffer = self.unwrapInboundIn(data)
-        guard let ioHandler = self.ioHandler else { context.fireChannelRead(data); return }
         let streaming: Bool
         if let bufferSuffix = buffer.readSlice(length: ChunkTool.eof.readableBytes) { 
             streaming = bufferSuffix != ChunkTool.eof 
@@ -175,50 +174,44 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
     }
     
     func write(context: ChannelHandlerContext, data: NIOAny, promise: EventLoopPromise<Void>?) {
-        let buffer = self.unwrapOutboundIn(data)
+        var buffer = self.unwrapOutboundIn(data)
         let channelInfo = app.channels[context.channel]!
-        if let _ = self.ioHandler {
-            buffers.append(buffer)
-            i += 1
-            if i == channelInfo.serializeSegment {
-                let r = send(chunk: buffers[0], streaming: true).flatMap {
-                    var res = ByteBufferAllocator().buffer(capacity: 0)
-                    for b in self.buffers[1..<self.buffers.count] {
-                        var bb = b
-                        res.writeBuffer(&bb)
-                    }
-                    return sendWithChunk(data: &res).map {
-                        self.i = 0
-                        self.buffers.removeAll()
-                    }
-                }
-                if let p = promise { r.cascade(to: p) }
-            }
-        } else {
-            buffers.removeAll()
-            context.writeAndFlush(data, promise: promise)
-        }
-
-        @Sendable
-        func sendWithChunk(data: inout ByteBuffer) -> EventLoopFuture<Void> {
-            var r = context.eventLoop.makeSucceededVoidFuture()
-            while data.readableBytes > 0 {
-                guard let chunk = data.readSlice(length: min(ChunkTool.maxChunk, data.readableBytes)) else { break }
-                let eof = data.readableBytes == 0
+        var r = context.eventLoop.makeSucceededVoidFuture()
+        let contentSize = channelInfo.contentSize ?? 0
+        guard buffer.readableBytes > 0 else { return }
+        if self.headerSent {
+            let size = buffer.readableBytes
+            while buffer.readableBytes > 0 {
+                guard let chunk = buffer.readSlice(length: min(ChunkTool.maxChunk, buffer.readableBytes)) else { break }
+                let eof = contentSize == (self.i + size)
                 r = r.flatMap {
                     send(chunk: chunk, streaming: !eof)
                 }
             }
-            
-            return r.flatMapError { err in
-                self.errorHappend(context: context, label: "Output", error: err)
-                return context.eventLoop.makeFailedFuture(err)
+            self.i += size
+            if contentSize == self.i {
+                self.i = 0
+                self.headerSent = false
             }
+        } else {
+            r = r.flatMap {
+                send(chunk: buffer, streaming: contentSize > 0)
+            }
+            self.headerSent = contentSize > 0
+            self.i = 0
+        }
+
+        r = r.flatMapError { err in
+            self.errorHappend(context: context, label: "Output", error: err)
+            return context.eventLoop.makeFailedFuture(err)
+        }
+
+        if let p = promise {
+            r.cascade(to: p)
         }
 
         @Sendable
         func send(chunk: ByteBuffer, streaming: Bool) -> EventLoopFuture<Void> {
-            guard let ioHandler = self.ioHandler else { return context.eventLoop.makeSucceededVoidFuture() }
             return ioHandler.output(response: chunk, context: context, info: channelInfo, streaming: streaming).flatMap { res in
                 if !streaming {
                     var r = res
@@ -231,16 +224,14 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
     }
 
     func channelRegistered(context: ChannelHandlerContext) {
-        guard let handler = ioHandler else { self.app.channels[context.channel] = .init(); return }
-        handler.connectionStart(context: context).flatMapError { err in
+        ioHandler.connectionStart(context: context).flatMapError { err in
             self.errorHappend(context: context, label: "连线建立", error: err)
             return context.eventLoop.makeFailedFuture(err)
         }.whenComplete { _ in self.app.channels[context.channel] = .init() }
     }
     
     func channelUnregistered(context: ChannelHandlerContext) {
-        guard let handler = ioHandler else { end(); return }
-        handler.connectionEnd(context: context, info: app.channels[context.channel]!).flatMapError { err in
+        ioHandler.connectionEnd(context: context, info: app.channels[context.channel]!).flatMapError { err in
             self.errorHappend(context: context, label: "连线终止", error: err)
             return context.eventLoop.makeFailedFuture(err)
         }.whenComplete { _ in end() }

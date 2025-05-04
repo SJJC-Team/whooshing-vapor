@@ -663,16 +663,16 @@ extension ChannelPipeline {
 
     func makeCustomHandlers(application: Application) -> [ChannelHandler] {
         var res: [ChannelHandler] = []
-        if let _ = application.httpIOHandler {
+        if let ioHandler = application.httpIOHandler {
             // 对 TCP 粘包和拆包的处理，非流式传输
             let frameEncoderHandler = LengthFieldPrepender(lengthFieldLength: .eight, lengthFieldEndianness: .big)
             let frameDecoderHandler = ByteToMessageHandler(LengthFieldBasedFrameDecoder(lengthFieldLength: .eight, lengthFieldEndianness: .big))
             res.append(frameEncoderHandler)
             res.append(frameDecoderHandler)
+            // Whooshing 加密处理器
+            let cryptoHandler = CustomCryptoIOHandler(app: application, ioHandler: ioHandler)
+            res.append(cryptoHandler)
         }
-        // Whooshing 加密处理器
-        let cryptoHandler = CustomCryptoIOHandler(app: application, ioHandler: application.httpIOHandler)
-        res.append(cryptoHandler)
         return res
     }
 }

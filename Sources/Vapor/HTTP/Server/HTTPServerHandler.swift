@@ -20,8 +20,10 @@ final class HTTPServerHandler: ChannelInboundHandler, RemovableChannelHandler {
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let box = NIOLoopBound((context, self), eventLoop: context.eventLoop)
         let request = self.unwrapInboundIn(data)
-        app.channels[context.channel]!.currentRequestID = request.id
-        request.channel = context.channel
+        if let channel = app.channels[context.channel] {
+            channel.currentRequestID = request.id
+            request.channel = context.channel
+        }
         // hop(to:) is required here to ensure we're on the correct event loop
         self.responder.respond(to: request).hop(to: context.eventLoop).whenComplete { response in
             let (context, handler) = box.value
@@ -37,7 +39,18 @@ final class HTTPServerHandler: ChannelInboundHandler, RemovableChannelHandler {
             if request.method == .HEAD {
                 response.responseBox.withLockedValue { $0.forHeadRequest = true }
             }
+            markContentSize(res: response)
             self.serialize(response, for: request, context: context)
+        }
+
+        func markContentSize(res: Response) {
+            if let channel = app.channels[context.channel] {
+                if let sizeStr = res.headers.first(name: .contentLength), let size = Int(sizeStr) {
+                    channel.contentSize = size
+                } else {
+                    channel.contentSize = nil
+                }
+            }
         }
     }
     

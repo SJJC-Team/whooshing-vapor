@@ -77,6 +77,7 @@ final public class Channels: StorageKey, @unchecked Sendable {
 
 public final class ChannelInfo: @unchecked Sendable {
     public internal(set) var upgraded: Bool = false
+    public internal(set) var contentSize: Int? = nil
     public internal(set) var currentRequestID: String! = nil
     internal var serializeSegment: Int { upgraded ? 2 : 3 }
 }
