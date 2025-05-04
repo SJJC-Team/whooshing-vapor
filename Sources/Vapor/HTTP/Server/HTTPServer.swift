@@ -25,6 +25,8 @@ public final class HTTPServer: Server, Sendable {
         
         /// Address the server will bind to. Configuring an address using a hostname with a nil host or port will use the default hostname or port respectively.
         public var address: BindAddress
+
+        public var serviceName: String?
         
         /// Host name the server will bind to.
         public var hostname: String {
@@ -281,7 +283,7 @@ public final class HTTPServer: Server, Sendable {
         }
 
         /// Log starting message for debugging before attempting to start the server.
-        configuration.logger.debug("Server starting on \(configuration.addressDescription)")
+        configuration.logger.debug("\(configuration.serviceName == nil ? "" : (configuration.serviceName! + " "))服务开始监听 \(configuration.addressDescription)")
         
         /// Start the actual `HTTPServer`.
         try self.connection.withLockedValue {
@@ -305,7 +307,7 @@ public final class HTTPServer: Server, Sendable {
         }
 
         /// Log started message with the actual configuration.
-        configuration.logger.notice("Server started on \(configuration.addressDescription)")
+        configuration.logger.notice("\(configuration.serviceName == nil ? "" : (configuration.serviceName! + " "))服务开始监听 \(configuration.addressDescription)")
 
         self.configuration = configuration
         self.didStart.withLockedValue { $0 = true }
@@ -327,7 +329,7 @@ public final class HTTPServer: Server, Sendable {
         }
         
         /// Log starting message for debugging before attempting to start the server.
-        configuration.logger.debug("Server starting on \(configuration.addressDescription)")
+        configuration.logger.debug("\(configuration.serviceName == nil ? "" : (configuration.serviceName! + " "))服务开始监听 \(configuration.addressDescription)")
 
         /// Start the actual `HTTPServer`.
         let serverConnection = try await HTTPServerConnection.start(
@@ -354,7 +356,7 @@ public final class HTTPServer: Server, Sendable {
         }
 
         /// Log started message with the actual configuration.
-        configuration.logger.notice("Server started on \(configuration.addressDescription)")
+        configuration.logger.notice("\(configuration.serviceName == nil ? "" : (configuration.serviceName! + " "))服务开始监听 \(configuration.addressDescription)")
 
         self.configuration = configuration
         self.didStart.withLockedValue { $0 = true }
