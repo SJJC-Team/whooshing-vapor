@@ -1,0 +1,307 @@
+name: Run pure unit tests
+on:
+  workflow_call:
+    inputs:
+      package_root:
+        type: string
+        required: false
+        default: ''
+        description: "Specifies a subpath of the checkout to run tests and upload coverage from."
+      test_filter:
+        type: string
+        required: false
+        default: ''
+        description: "Apply a --filter to the tests that will be run."
+      with_testing:
+        type: boolean
+        required: false
+        default: true
+        description: "Set to 'true' to enable compilation for testing and @testable imports. Defaults to 'true'."
+      with_release_mode_testing:
+        type: boolean
+        required: false
+        default: false
+        description: "Set to 'true' to enable testing in release mode as well. Defaults to 'false'."
+      with_coverage:
+        type: boolean
+        required: false
+        default: true
+        description: "Set to 'true' to collect and upload code coverage data. Defaults to 'false'."
+      with_tsan:
+        type: boolean
+        required: false
+        default: true
+        description: "Set to 'true' to run tests with Thread Sanitizer. Defaults to 'true'."
+      warnings_as_errors:
+        type: boolean
+        required: false
+        default: false
+        description: "Set to 'true' to treat warnings as errors. Defaults to 'false'."
+      with_api_check:
+        type: boolean
+        required: false
+        default: true
+        description: "Set to 'true' to run the SwiftPM public API breakage check. Defaults to 'true'."
+      with_linting:
+        type: boolean
+        required: false
+        default: false
+        description: "Set to 'true' to run swift-format's lint process. Defaults to 'false'."
+      with_windows:
+        type: boolean
+        required: false
+        default: false
+        description: "Set to 'true' to run tests on Windows. Defaults to 'false'."
+      with_musl:
+        type: boolean
+        required: false
+        default: false
+        description: "Set to 'true' to build with the Static Linux SDK to test MUSL compatibility. Defaults to 'false'."
+      with_android:
+        type: boolean
+        required: false
+        default: false
+        description: "Set to 'true' to run tests against an Android emulator. Defaults to 'false'."
+      android_copy_files:
+        type: string
+        required: false
+        default: ''
+        description: "A list of files to copy to the test context when running Android tests. Defaults to none."
+      ios_scheme_name:
+        type: string
+        required: false
+        default: ''
+        description: "Set to the scheme name in Xcode to run tests on iOS. Defaults to '' which won't run any tests."
+      extra_flags:
+        type: string
+        required: false
+        default: ''
+        description: "Additional 'swift test' flags to be applied on when testing on all platforms."
+      extra_musl_flags:
+        type: string
+        required: false
+        default: ''
+        description: "Additional 'swift build' flags to be applied on when compiling with MUSL."
+      ios_xcodebuild_action:
+        type: string
+        required: false
+        default: 'test'
+        description: "Action to pass to xcodebuild when running iOS tests. Defaults to 'test'. Set to '' to just compile and not run tests."
+    secrets:
+      CODECOV_TOKEN:
+        required: false
+env:
+  WITH_TESTING: ${{ inputs.with_testing && '-Xswiftc -enable-testing' || '' }}
+  PACKAGE_ROOT: ${{ inputs.package_root != '' && format('--package-path={0}', inputs.package_root) || '' }}
+  EXTRA_FLAGS:  ${{ inputs.extra_flags }}
+  EXTRA_MUSL_FLAGS: ${{ inputs.extra_musl_flags }}
+  WITH_TSAN: ${{ inputs.with_tsan && '--sanitize=thread' || '' }}
+  WARNINGS_AS_ERRORS: ${{ inputs.warnings_as_errors && '-Xswiftc -warnings-as-errors' || '' }}
+  TEST_FILTER:  ${{ inputs.test_filter != '' && format('--filter={0}', inputs.test_filter) || '' }}
+  WITH_COVERAGE: ${{ inputs.with_coverage && '--enable-code-coverage' || '' }}
+  IOS_SCHEME_NAME: ${{ inputs.ios_scheme_name }}
+  IOS_XCODEBUILD_ACTION: ${{ inputs.ios_xcodebuild_action }}
+
+jobs:
+  api-breakage:
+    if: ${{ inputs.with_api_check && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    container: swift:noble
+    timeout-minutes: 30
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with: { 'fetch-depth': 0 }
+      - name: Run API breakage check
+        run: |
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+          swift package ${PACKAGE_ROOT} diagnose-api-breaking-changes origin/main ${EXTRA_FLAGS}
+
+  linux-unit:
+    if: ${{ !(github.event.pull_request.draft || false) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        swift-config:
+          - { image: "swift:6.0-noble", "build-mode": "debug" }
+          - { image: "swift:6.1-noble", "build-mode": "debug" }
+          - { image: "swift:6.1-noble", "build-mode": "release" }
+    runs-on: ubuntu-latest
+    container: ${{ matrix.swift-config.image }}
+    timeout-minutes: 60
+    steps:
+      - name: Check out code
+        if: ${{ matrix.swift-config.build-mode == 'debug' || inputs.with_release_mode_testing }}
+        uses: actions/checkout@v4
+      - name: Check Swift compatibility
+        id: swift-check
+        if: ${{ matrix.swift-config.build-mode == 'debug' || inputs.with_release_mode_testing }}
+        uses: vapor/ci/.github/actions/check-compatible-swift@main
+        with:
+          package_root: ${{ inputs.package_root }}
+      - name: Run unit tests
+        if: ${{ steps.swift-check.outputs.swift-compatible == 'true' && (matrix.swift-config.build-mode == 'debug' || inputs.with_release_mode_testing) }}
+        run: |
+          SWIFT_DETERMINISTIC_HASHING=1 \
+          swift test \
+            -c ${{ matrix.swift-config.build-mode }} \
+            ${WITH_TESTING} \
+            ${PACKAGE_ROOT} \
+            ${WITH_TSAN} \
+            ${WARNINGS_AS_ERRORS} \
+            ${WITH_COVERAGE} \
+            ${TEST_FILTER} \
+            ${EXTRA_FLAGS}
+      - name: Upload coverage data
+        if: ${{ inputs.with_coverage && (steps.swift-check.outputs.swift-compatible == 'true') && (matrix.swift-config.build-mode == 'debug' || inputs.with_release_mode_testing) }}
+        uses: vapor/swift-codecov-action@v0.3
+        with:
+          codecov_token:    ${{ secrets.CODECOV_TOKEN || '' }}
+          package_path:     ${{ inputs.package_root }}
+          build_parameters: -c ${{ matrix.swift-config.build-mode }} ${{ inputs.extra_flags }}
+
+  macos-unit:
+    if: ${{ !(github.event.pull_request.draft || false) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - macos-version: macos-14
+            xcode-version: latest-stable
+          - macos-version: macos-15
+            xcode-version: latest-stable
+    runs-on: ${{ matrix.macos-version }}
+    timeout-minutes: 60
+    steps:
+      - name: Select appropriate Xcode version
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ matrix.xcode-version }}
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Check Swift compatibility
+        id: swift-check
+        uses: vapor/ci/.github/actions/check-compatible-swift@main
+        with:
+          package_root: ${{ inputs.package_root }}
+      - name: Run unit tests
+        if: ${{ steps.swift-check.outputs.swift-compatible == 'true' }}
+        env:
+          WITH_TSAN_MACOS: ${{ (inputs.with_tsan && matrix.macos-version != 'macos-14') && '--sanitize=thread' || '' }}
+        run: |
+          SWIFT_DETERMINISTIC_HASHING=1 \
+          swift test \
+            ${PACKAGE_ROOT} \
+            ${WITH_TSAN_MACOS} \
+            ${WITH_COVERAGE} \
+            ${TEST_FILTER} \
+            ${EXTRA_FLAGS}
+      - name: Upload coverage data
+        if: ${{ (steps.swift-check.outputs.swift-compatible == 'true') && inputs.with_coverage }}
+        uses: vapor/swift-codecov-action@v0.3
+        with:
+          codecov_token:    ${{ secrets.CODECOV_TOKEN || '' }}
+          package_path:     ${{ inputs.package_root }}
+          build_parameters: ${{ inputs.extra_flags }}
+
+  windows-unit:
+    if: ${{ !(github.event.pull_request.draft || false) && inputs.with_windows }}
+    strategy:
+      fail-fast: false
+      matrix:
+        swift-version:
+          # - 5.9
+          # - 5.10
+          - 6.0
+          - 6.1
+        include:
+          # - { swift-version: 5.9, swift-branch: swift-5.9.2-release, swift-tag: 5.9.2-RELEASE }
+          # - { swift-version: 5.10, swift-branch: swift-5.10.1-release, swift-tag: 5.10.1-RELEASE }
+          - { swift-version: 6.0, swift-branch: swift-6.0.3-release, swift-tag: 6.0.3-RELEASE }
+          - { swift-version: 6.1, swift-branch: swift-6.1-release, swift-tag: 6.1-RELEASE }
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      # https://github.com/compnerd/cassowary/pull/27
+      - name: Configure dev environment
+        uses: compnerd/gha-setup-vsdevenv@main
+        with:
+          toolset_version: 14.29
+          winsdk: 10.0.22621.0
+      - name: Install Windows Swift toolchain
+        uses: compnerd/gha-setup-swift@main
+        with:
+          branch: ${{ matrix.swift-branch }}
+          tag: ${{ matrix.swift-tag }}
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Run unit tests
+        run: |
+          swift test ${PACKAGE_ROOT} ${WITH_TSAN} ${TEST_FILTER} ${EXTRA_FLAGS} -Xbuild-tools-swiftc -windows-sdk-root -Xbuild-tools-swiftc "${env:WindowsSdkDir}" -Xbuild-tools-swiftc -windows-sdk-version -Xbuild-tools-swiftc ${env:UCRTVersion} -Xswiftc -windows-sdk-root -Xswiftc "${env:WindowsSdkDir}" -Xswiftc -windows-sdk-version -Xswiftc ${env:UCRTVersion}
+
+  ios-unit:
+    if: ${{ !(github.event.pull_request.draft || false) && inputs.ios_scheme_name != '' }}
+    runs-on: macos-15
+    steps:
+      - name: Select appropriate Xcode version
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Run iOS Tests
+        run: xcodebuild ${IOS_XCODEBUILD_ACTION} -scheme ${IOS_SCHEME_NAME} -destination 'platform=iOS Simulator,OS=18.0,name=iPhone 16 Pro'
+
+  lint:
+    if: ${{ inputs.with_linting }}
+    runs-on: ubuntu-latest
+    container: swift:noble
+    timeout-minutes: 5
+    steps:
+      - name: Configure git
+        run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Read config file
+        # if .swift-format is not provided in the repo, use the default config file from CI
+        run: |
+          if [ ! -f .swift-format ]; then
+            echo "No .swift-format file found, using default configuration."
+            apt-get update && apt-get install -y curl
+            curl -O https://raw.githubusercontent.com/vapor/contributing/refs/heads/main/.swift-format
+          fi
+      - name: Lint
+        run: |
+          apt -q update && apt -yq install curl
+          curl -s https://raw.githubusercontent.com/swiftlang/github-workflows/refs/heads/main/.github/workflows/scripts/check-swift-format.sh | bash
+
+  musl:
+    if: ${{ !(github.event.pull_request.draft || false) && inputs.with_musl }}
+    runs-on: ubuntu-latest
+    container: swift:noble
+    timeout-minutes: 30
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Install SDK
+        run: swift sdk install https://download.swift.org/swift-6.1-release/static-sdk/swift-6.1-RELEASE/swift-6.1-RELEASE_static-linux-0.0.1.artifactbundle.tar.gz --checksum 111c6f7d280a651208b8c74c0521dd99365d785c1976a6e23162f55f65379ac6
+      - name: Build
+        run: swift build --swift-sdk x86_64-swift-linux-musl ${PACKAGE_PATH} ${EXTRA_FLAGS} ${EXTRA_MUSL_FLAGS} ${WARNINGS_AS_ERRORS}
+
+  android-unit:
+    if: ${{ !(github.event.pull_request.draft || false) && inputs.with_android }}
+    strategy:
+      fail-fast: false
+      matrix:
+        swift-version:
+          - 6.1
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Run unit tests
+        uses: skiptools/swift-android-action@v2
+        with:
+          swift-version: ${{ matrix.swift-version }}
+          copy-files: ${{ inputs.android_copy_files }}
