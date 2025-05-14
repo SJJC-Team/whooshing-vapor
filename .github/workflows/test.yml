@@ -38,7 +38,7 @@ jobs:
         run: swift test --package-path ./provider
 
   unit-tests:
-    uses: run-unit-tests.yml
+    uses: ./.github/workflows/run-unit-tests.yml
     with:
       with_release_mode_testing: true
       with_tsan: false
