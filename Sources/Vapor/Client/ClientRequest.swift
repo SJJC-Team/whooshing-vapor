@@ -9,7 +9,7 @@ public struct ClientRequest: Sendable {
     public var headers: HTTPHeaders
     public var body: ByteBuffer?
     public var timeout: TimeAmount?
-    public var channel: Channel?
+    public weak var channel: Channel?
     private let byteBufferAllocator: ByteBufferAllocator
 
     public init(

@@ -7,7 +7,7 @@ final class HTTPServerHandler: ChannelInboundHandler, RemovableChannelHandler {
     
     let responder: Responder
     let logger: Logger
-    let app: Application
+    unowned let app: Application
     var isShuttingDown: Bool
     
     init(responder: Responder, logger: Logger, app: Application) {
@@ -20,7 +20,7 @@ final class HTTPServerHandler: ChannelInboundHandler, RemovableChannelHandler {
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let box = NIOLoopBound((context, self), eventLoop: context.eventLoop)
         let request = self.unwrapInboundIn(data)
-        if let channel = app.channels[context.channel] {
+        if let channel = app.channels?[context.channel] {
             channel.currentRequestID = request.id
             request.channel = context.channel
         }
@@ -44,7 +44,7 @@ final class HTTPServerHandler: ChannelInboundHandler, RemovableChannelHandler {
         }
 
         func markContentSize(res: Response) {
-            if let channel = app.channels[context.channel] {
+            if let channel = app.channels?[context.channel] {
                 if let sizeStr = res.headers.first(name: .contentLength), let size = Int(sizeStr) {
                     channel.contentSize = size
                 } else {

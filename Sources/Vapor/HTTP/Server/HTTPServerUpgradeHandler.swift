@@ -20,7 +20,7 @@ final class HTTPServerUpgradeHandler: ChannelDuplexHandler, RemovableChannelHand
     let httpRequestDecoder: ByteToMessageHandler<HTTPRequestDecoder>
     let httpHandlers: [RemovableChannelHandler]
     
-    private var app: Application
+    private unowned var app: Application
     
     init(
         httpRequestDecoder: ByteToMessageHandler<HTTPRequestDecoder>,
@@ -40,8 +40,12 @@ final class HTTPServerUpgradeHandler: ChannelDuplexHandler, RemovableChannelHand
         let connectionHeaders = Set(req.headers[canonicalForm: "connection"].map { $0.lowercased() })
         if connectionHeaders.contains("upgrade") {
             let buffer = UpgradeBufferHandler()
-            _ = context.channel.pipeline.addHandler(buffer, position: .before(self.httpRequestDecoder))
-            self.upgradeState = .pending(req, buffer)
+            do {
+                _ = try context.channel.pipeline.syncOperations.addHandler(buffer, position: .before(self.httpRequestDecoder))
+                self.upgradeState = .pending(req, buffer)
+            } catch {
+                self.errorCaught(context: context, error: error)
+            }
         }
         
         context.fireChannelRead(data)
@@ -65,7 +69,7 @@ final class HTTPServerUpgradeHandler: ChannelDuplexHandler, RemovableChannelHand
                 return (box.status, box.upgrader)
             }
             if status == .switchingProtocols, let upgrader = upgrader {
-                if let info = app.channels[context.channel] {
+                if let info = app.channels?[context.channel] {
                     info.upgraded = true
                 }
                 let protocolUpgrader = upgrader.applyUpgrade(req: req, res: res)
@@ -95,19 +99,19 @@ final class HTTPServerUpgradeHandler: ChannelDuplexHandler, RemovableChannelHand
                     let sendableBox = box.value
                     let handlers: [RemovableChannelHandler] = [sendableBox.handler] + sendableBox.handler.httpHandlers
                     return .andAllComplete(handlers.map { handler in
-                        return sendableBox.context.pipeline.removeHandler(handler)
+                        sendableBox.context.pipeline.syncOperations.removeHandler(handler)
                     }, on: box.value.context.eventLoop)
                 }.flatMap {
                     let sendableBox = box.value
                     return sendableBox.protocolUpgrader.upgrade(context: sendableBox.context, upgradeRequest: head)
                 }.flatMap {
                     let sendableBox = box.value
-                    return sendableBox.context.pipeline.removeHandler(sendableBox.buffer)
+                    return sendableBox.context.pipeline.syncOperations.removeHandler(sendableBox.buffer)
                 }.cascadeFailure(to: promise)
             } else {
                 // reset handlers
                 self.upgradeState = .ready
-                context.channel.pipeline.removeHandler(buffer, promise: nil)
+                context.channel.pipeline.syncOperations.removeHandler(buffer, promise: nil)
                 context.write(self.wrapOutboundOut(res), promise: promise)
             }
         case .ready, .upgraded:

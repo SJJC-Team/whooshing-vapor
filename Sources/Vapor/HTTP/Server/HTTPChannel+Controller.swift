@@ -2,7 +2,7 @@ import NIOCore
 
 public extension Application {
     /// 记录了当前所有客户端连线的 Channel 信息，其中包括当前请求的 ID，以及是否为 WebSocket 连线的附加信息
-    var channels: Channels! { self.storage[Channels.self] }
+    var channels: Channels? { self.storage[Channels.self] }
 }
 
 /// 记录了当前所有客户端连线的 Channel 信息，其中包括当前请求的 ID，以及是否为 WebSocket 连线的附加信息
