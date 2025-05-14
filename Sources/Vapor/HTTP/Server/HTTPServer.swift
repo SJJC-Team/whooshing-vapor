@@ -297,7 +297,7 @@ public final class HTTPServer: Server, Sendable {
         }
 
         /// Overwrite configuration with actual address, if applicable.
-        /// They may differ from the provided configuation if port 0 was provided, for example.
+        /// They may differ from the provided configuration if port 0 was provided, for example.
         if let localAddress = self.localAddress {
             if let hostname = localAddress.hostname, let port = localAddress.port {
                 configuration.address = .hostname(hostname, port: port)
@@ -346,7 +346,7 @@ public final class HTTPServer: Server, Sendable {
         }
         
         /// Overwrite configuration with actual address, if applicable.
-        /// They may differ from the provided configuation if port 0 was provided, for example.
+        /// They may differ from the provided configuration if port 0 was provided, for example.
         if let localAddress = self.localAddress {
             if let hostname = localAddress.hostname, let port = localAddress.port {
                 configuration.address = .hostname(hostname, port: port)
@@ -427,7 +427,9 @@ private final class HTTPServerConnection: Sendable {
             /// Set handlers that are applied to the Server's channel.
             .serverChannelInitializer { channel in
                 application.storage[Channels.self] = .init()
-                return channel.pipeline.addHandler(quiesce.makeServerChannelHandler(channel: channel))
+                return channel.eventLoop.makeCompletedFuture {
+                    try channel.pipeline.syncOperations.addHandler(quiesce.makeServerChannelHandler(channel: channel))
+                }
             }
             
             /// Set the handlers that are applied to the accepted Channels.
@@ -453,7 +455,9 @@ private final class HTTPServerConnection: Sendable {
                         configuration.logger.error("Could not configure TLS: \(error)")
                         return channel.close(mode: .all)
                     }
-                    return channel.pipeline.addHandler(tlsHandler).flatMap { _ in
+                    return channel.eventLoop.makeCompletedFuture {
+                        try channel.pipeline.syncOperations.addHandlers(tlsHandler)
+                    }.flatMap { _ in
                         channel.configureHTTP2SecureUpgrade(h2ChannelConfigurator: { channel in
                             channel.configureHTTP2Pipeline(
                                 mode: .server,
@@ -584,11 +588,13 @@ extension ChannelPipeline {
         let handler = HTTPServerHandler(responder: responder, logger: application.logger, app: application)
         handlers.append(handler)
         
-        return self.addHandlers(customHandlers).flatMap {
-            self.addHandlers(handlers).flatMap {
-                /// Close the connection in case of any errors.
-                self.addHandler(NIOCloseOnErrorHandler())
-            }
+        
+        return self.eventLoop.makeCompletedFuture {
+            try self.syncOperations.addHandlers(customHandlers)
+            try self.syncOperations.addHandlers(handlers)
+        }.flatMap {
+            /// Close the connection in case of any errors.
+            self.addHandler(NIOCloseOnErrorHandler())
         }
     }
     
@@ -654,12 +660,13 @@ extension ChannelPipeline {
 
         handlers.append(upgrader)
         handlers.append(handler)
-        
-        return self.addHandlers(customHandlers).flatMap { 
-            self.addHandlers(handlers).flatMap {
-                /// Close the connection in case of any errors.
-                self.addHandler(NIOCloseOnErrorHandler())
-            }
+
+        return self.eventLoop.makeCompletedFuture {
+            try self.syncOperations.addHandlers(customHandlers)
+            try self.syncOperations.addHandlers(handlers)
+        }.flatMap {
+            /// Close the connection in case of any errors.
+            self.addHandler(NIOCloseOnErrorHandler())
         }
     }
 
