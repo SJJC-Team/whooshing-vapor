@@ -20,7 +20,7 @@ final class HTTPServerUpgradeHandler: ChannelDuplexHandler, RemovableChannelHand
     let httpRequestDecoder: ByteToMessageHandler<HTTPRequestDecoder>
     let httpHandlers: [RemovableChannelHandler]
     
-    private var app: Application
+    private unowned var app: Application
     
     init(
         httpRequestDecoder: ByteToMessageHandler<HTTPRequestDecoder>,
@@ -69,7 +69,7 @@ final class HTTPServerUpgradeHandler: ChannelDuplexHandler, RemovableChannelHand
                 return (box.status, box.upgrader)
             }
             if status == .switchingProtocols, let upgrader = upgrader {
-                if let info = app.channels[context.channel] {
+                if let info = app.channels?[context.channel] {
                     info.upgraded = true
                 }
                 let protocolUpgrader = upgrader.applyUpgrade(req: req, res: res)
