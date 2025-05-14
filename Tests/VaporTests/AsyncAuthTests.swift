@@ -1,6 +1,10 @@
 import XCTVapor
 import Vapor
 import XCTest
+#if os(Android)
+// sleep() is not imported by default on Android
+import func Android.sleep
+#endif
 
 final class AsyncAuthenticationTests: XCTestCase {
     
@@ -119,6 +123,42 @@ final class AsyncAuthenticationTests: XCTestCase {
         try await app.testable().test(.GET, "/test") { res async in
             XCTAssertEqual(res.status, .unauthorized)
         }.test(.GET, "/test", headers: ["Authorization": "Basic \(basic)"]) { res async in
+            XCTAssertEqual(res.status, .ok)
+            XCTAssertEqual(res.body.string, "Vapor")
+        }
+    }
+
+    func testBasicAuthenticatorWithEmptyPassword() throws {
+        struct Test: Authenticatable {
+            static func authenticator() -> Authenticator {
+                TestAuthenticator()
+            }
+
+            var name: String
+        }
+
+        struct TestAuthenticator: BasicAuthenticator {
+            typealias User = Test
+
+            func authenticate(basic: BasicAuthorization, for request: Request) -> EventLoopFuture<Void> {
+                if basic.username == "test" && basic.password == "" {
+                    let test = Test(name: "Vapor")
+                    request.auth.login(test)
+                }
+                return request.eventLoop.makeSucceededFuture(())
+            }
+        }
+
+        app.routes.grouped([
+            Test.authenticator(), Test.guardMiddleware()
+        ]).get("test") { req -> String in
+            return try req.auth.require(Test.self).name
+        }
+
+        let basic = Data("test:".utf8).base64EncodedString()
+        try app.testable().test(.GET, "/test") { res in
+            XCTAssertEqual(res.status, .unauthorized)
+        }.test(.GET, "/test", headers: ["Authorization": "Basic \(basic)"]) { res in
             XCTAssertEqual(res.status, .ok)
             XCTAssertEqual(res.body.string, "Vapor")
         }
@@ -243,5 +283,49 @@ final class AsyncAuthenticationTests: XCTestCase {
 
         var config = Middlewares()
         config.use(Test.authenticator())
+    }
+
+    func testAsyncAuthenticator() throws {
+        struct Test: Authenticatable {
+            static func authenticator(threadPool: NIOThreadPool) -> Authenticator {
+                TestAuthenticator(threadPool: threadPool)
+            }
+            var name: String
+        }
+
+        struct TestAuthenticator: BasicAuthenticator {
+            typealias User = Test
+            let threadPool: NIOThreadPool
+
+            func authenticate(basic: BasicAuthorization, for request: Request) -> EventLoopFuture<Void> {
+                let promise = request.eventLoop.makePromise(of: Void.self)
+                self.threadPool.submit { _ in
+                    sleep(1)
+                    request.eventLoop.execute {
+                        if basic.username == "test" && basic.password == "secret" {
+                            let test = Test(name: "Vapor")
+                            request.auth.login(test)
+                        }
+                        promise.succeed(())
+                    }
+                }
+                return promise.futureResult
+            }
+        }
+
+        app.routes.grouped([
+            Test.authenticator(threadPool: app.threadPool),
+            Test.guardMiddleware()
+        ]).get("test") { req -> String in
+            return try req.auth.require(Test.self).name
+        }
+
+        let basic = "test:secret".data(using: .utf8)!.base64EncodedString()
+        try app.testable().test(.GET, "/test") { res in
+            XCTAssertEqual(res.status, .unauthorized)
+        }.test(.GET, "/test", headers: ["Authorization": "Basic \(basic)"]) { res in
+            XCTAssertEqual(res.status, .ok)
+            XCTAssertEqual(res.body.string, "Vapor")
+        }
     }
 }
