@@ -175,7 +175,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
     
     func write(context: ChannelHandlerContext, data: NIOAny, promise: EventLoopPromise<Void>?) {
         var buffer = self.unwrapOutboundIn(data)
-        let channelInfo = app.channels![context.channel]!
+        guard let channelInfo = app.channels?[context.channel] else { return }
         var r = context.eventLoop.makeSucceededVoidFuture()
         let contentSize = channelInfo.contentSize ?? 0
         guard buffer.readableBytes > 0 else { return }
