@@ -426,8 +426,7 @@ private final class HTTPServerConnection: Sendable {
             
             /// Set handlers that are applied to the Server's channel.
             .serverChannelInitializer { channel in
-                application.storage[Channels.self] = .init()
-                return channel.eventLoop.makeCompletedFuture {
+                channel.eventLoop.makeCompletedFuture {
                     try channel.pipeline.syncOperations.addHandler(quiesce.makeServerChannelHandler(channel: channel))
                 }
             }
@@ -679,7 +678,7 @@ extension ChannelPipeline {
             res.append(frameEncoderHandler)
             res.append(frameDecoderHandler)
             // Whooshing 加密处理器
-            let cryptoHandler = CustomCryptoIOHandler(app: application, ioHandler: ioHandler)
+            let cryptoHandler = CustomCryptoIOHandler(ioHandler: ioHandler, logger: application.logger)
             res.append(cryptoHandler)
         }
         return res

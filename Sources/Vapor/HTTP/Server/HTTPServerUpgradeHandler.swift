@@ -69,9 +69,6 @@ final class HTTPServerUpgradeHandler: ChannelDuplexHandler, RemovableChannelHand
                 return (box.status, box.upgrader)
             }
             if status == .switchingProtocols, let upgrader = upgrader {
-                if let info = app.channels?[context.channel] {
-                    info.upgraded = true
-                }
                 let protocolUpgrader = upgrader.applyUpgrade(req: req, res: res)
                 let sendableBox = SendableBox(
                     context: context,
