@@ -20,17 +20,13 @@ final class HTTPServerUpgradeHandler: ChannelDuplexHandler, RemovableChannelHand
     let httpRequestDecoder: ByteToMessageHandler<HTTPRequestDecoder>
     let httpHandlers: [RemovableChannelHandler]
     
-    private unowned var app: Application
-    
     init(
         httpRequestDecoder: ByteToMessageHandler<HTTPRequestDecoder>,
-        httpHandlers: [RemovableChannelHandler],
-        app: Application
+        httpHandlers: [RemovableChannelHandler]
     ) {
         self.upgradeState = .ready
         self.httpRequestDecoder = httpRequestDecoder
         self.httpHandlers = httpHandlers
-        self.app = app
     }
     
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {

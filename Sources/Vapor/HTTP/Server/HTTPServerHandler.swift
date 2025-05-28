@@ -7,14 +7,12 @@ final class HTTPServerHandler: ChannelInboundHandler, RemovableChannelHandler {
     
     let responder: Responder
     let logger: Logger
-    unowned let app: Application
     var isShuttingDown: Bool
     
-    init(responder: Responder, logger: Logger, app: Application) {
+    init(responder: Responder, logger: Logger) {
         self.responder = responder
         self.logger = logger
         self.isShuttingDown = false
-        self.app = app
     }
     
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {

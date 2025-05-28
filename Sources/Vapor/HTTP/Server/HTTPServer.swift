@@ -584,7 +584,7 @@ extension ChannelPipeline {
         handlers.append(serverResEncoder)
         
         /// Add server request → response delegate.
-        let handler = HTTPServerHandler(responder: responder, logger: application.logger, app: application)
+        let handler = HTTPServerHandler(responder: responder, logger: application.logger)
         handlers.append(handler)
         
         
@@ -648,13 +648,12 @@ extension ChannelPipeline {
         )
         handlers.append(serverReqDecoder)
         /// Add server request → response delegate.
-        let handler = HTTPServerHandler(responder: responder, logger: application.logger, app: application)
+        let handler = HTTPServerHandler(responder: responder, logger: application.logger)
 
         /// Add HTTP upgrade handler.
         let upgrader = HTTPServerUpgradeHandler(
             httpRequestDecoder: httpReqDecoder,
-            httpHandlers: handlers + [handler],
-            app: application
+            httpHandlers: handlers + [handler]
         )
 
         handlers.append(upgrader)
