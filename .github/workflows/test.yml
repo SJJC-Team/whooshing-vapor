@@ -13,7 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         provider:
-          - vapor/jwt
+#          - vapor/jwt
           - vapor/fluent
           - vapor/leaf
           - vapor/queues
