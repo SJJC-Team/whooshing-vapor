@@ -3,5 +3,5 @@
 Add this in your Package.swift file: 
 
 ```
-.package(url: "https://github.com/SJJC-Team/whooshing-vapor.git", .upToNextMajor(from: "1.0.1"))
+.package(url: "https://github.com/SJJC-Team/whooshing-vapor.git", .upToNextMajor(from: "1.0.7"))
 ```
