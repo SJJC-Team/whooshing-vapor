@@ -6,7 +6,7 @@ let package = Package(
     name: "vapor",
     platforms: [
         .macOS(.v10_15),
-        .iOS(.v13),
+        .iOS(.v14),
         .tvOS(.v13),
         .watchOS(.v6)
     ],
@@ -16,6 +16,9 @@ let package = Package(
         .library(name: "VaporTesting", targets: ["VaporTesting"]),
     ],
     dependencies: [
+        // Whooshing Basic tools
+        .package(url: "https://github.com/SJJC-Team/whooshing.toolbox-basic.git", .upToNextMajor(from: "1.4.3")),
+        
         // HTTP client library built on SwiftNIO
         .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.24.0"),
 
@@ -75,6 +78,8 @@ let package = Package(
         .target(
             name: "Vapor",
             dependencies: [
+                .product(name: "NIOAdvanced", package: "whooshing.toolbox-basic"),
+                .product(name: "ErrorHandle", package: "whooshing.toolbox-basic"),
                 .product(name: "AsyncHTTPClient", package: "async-http-client"),
                 .product(name: "AsyncKit", package: "async-kit"),
                 .target(name: "CVaporBcrypt"),

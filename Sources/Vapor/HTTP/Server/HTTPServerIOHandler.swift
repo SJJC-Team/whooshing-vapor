@@ -1,18 +1,23 @@
 import NIOCore
 import Logging
 import NIOHTTP1
+import NIOAdvanced
 import Foundation
+import NIOFoundationCompat
 
 public extension Application {
     /// 为 HTTP IO 流配置流处理，如果为 nil，则不进行任何处理
-    var httpIOHandler: HTTPIOHandler? { self.storage[HttpIoHandler.self] }
+    @inlinable
+    var httpIOHandler: AnyHTTPIOHandler? { self.storage[HttpIoHandler.self] }
     
-    func use(httpIOHandler handler: HTTPIOHandler) {
+    @inlinable
+    func use(httpIOHandler handler: AnyHTTPIOHandler) {
         self.storage[HttpIoHandler.self] = handler
     }
     
+    @frozen
     struct HttpIoHandler: StorageKey, Sendable {
-        public typealias Value = HTTPIOHandler
+        public typealias Value = AnyHTTPIOHandler
     }
 }
 
@@ -24,6 +29,9 @@ public extension Application {
 ///
 /// 它们的作用相同，不同仅仅在于数据类型不同，后者免去了从底层 ByteBuffer 与 Data 互转的步骤，直接操作更底层的 ByteBuffer，更加轻量
 public protocol HTTPIOHandler: Sendable {
+    
+    associatedtype Failure: Error
+    
     /// 当接受到请求时，解析传来的请求。通常是进行解密操作，以将密文转为下一步可解析的 HTTP 报文
     ///
     /// - 参数：
@@ -32,7 +40,7 @@ public protocol HTTPIOHandler: Sendable {
     ///     - streaming: 表示当前数据正在分片传送中，尚未完成
     /// - 返回：解包过后的请求数据 Data，若返回 nil 则意味着捕获该请求，而不再进行后续处理
     /// - 注意：当 streaming 为 true 时，不会考虑您的返回值，无论其为 nil 或 Data
-    func input(request: Data, context: ChannelHandlerContext) -> EventLoopFuture<Data>
+    func input(request: Data, context: ChannelHandlerContext) -> EventLoopResult<Data, Failure>
     /// 当该服务器对客户端做出响应时，包装将要做出的响应。通常是进行加密操作，以保护响应不被窃取
     ///
     /// - 参数：
@@ -41,7 +49,7 @@ public protocol HTTPIOHandler: Sendable {
     ///     - info: 该连线的附加信息，包括是否为 WebSocket，以及当前请求的 ID
     ///     - streaming: 表示当前数据正在分片传送中，尚未完成
     /// - 返回：处理过后的响应数据 Data
-    func output(response: Data, context: ChannelHandlerContext) -> EventLoopFuture<Data>
+    func output(response: Data, context: ChannelHandlerContext) -> EventLoopResult<Data, Failure>
     /// 当接受到请求时，解析传来的请求。通常是进行解密操作，以将密文转为下一步可解析的 HTTP 报文。免去 ByteBuffer 与 Data 互转的步骤，直接操作 ByteBuffer，更加轻量
     ///
     /// - 参数：
@@ -50,7 +58,7 @@ public protocol HTTPIOHandler: Sendable {
     ///     - streaming: 表示当前数据正在分片传送中，尚未完成
     /// - 返回：解包过后的请求数据 ByteBuffer，若返回 nil 则意味着捕获该请求，而不再进行后续处理
     /// - 注意：当 streaming 为 true 时，不会考虑您的返回值，无论其为 nil 或 Data
-    func input(request: ByteBuffer, context: ChannelHandlerContext) -> EventLoopFuture<ByteBuffer>
+    func input(request: ByteBuffer, context: ChannelHandlerContext) -> EventLoopResult<ByteBuffer, Failure>
     /// 当该服务器对客户端做出响应时，包装将要做出的响应。通常是进行加密操作，以保护响应不被窃取。免去 ByteBuffer 与 Data 互转的步骤，直接操作 ByteBuffer，更加轻量
     ///
     /// - 参数：
@@ -59,25 +67,28 @@ public protocol HTTPIOHandler: Sendable {
     ///     - info: 该连线的附加信息，包括是否为 WebSocket，以及当前请求的 ID
     ///     - streaming: 表示当前数据正在分片传送中，尚未完成
     /// - 返回：处理过后的响应数据 ByteBuffer
-    func output(response: ByteBuffer, context: ChannelHandlerContext) -> EventLoopFuture<ByteBuffer>
+    func output(response: ByteBuffer, context: ChannelHandlerContext) -> EventLoopResult<ByteBuffer, Failure>
     
     /// 当连线建立后，调用此方法，不提供 Info 参数，因为此时还未初始化该参数。默认不进行任何动作
-    func connectionStart(context: ChannelHandlerContext) -> EventLoopFuture<Void>
+    func connectionStart(context: ChannelHandlerContext) -> EventLoopResult<Void, Failure>
     
     /// 当连线将终止后，调用此方法。默认不进行任何动作
-    func connectionEnd(context: ChannelHandlerContext) -> EventLoopFuture<Void>
+    func connectionEnd(context: ChannelHandlerContext) -> EventLoopResult<Void, Failure>
 }
 
 public extension HTTPIOHandler {
     
     /// 默认不进行任何处理，直接将 request 作为返回值
-    func input(request: Data, context: ChannelHandlerContext) -> EventLoopFuture<Data> { context.eventLoop.makeSucceededFuture(request) }
+    @inlinable
+    func input(request: Data, context: ChannelHandlerContext) -> EventLoopResult<Data, Failure> { context.eventLoop.makeSucceededResult(request) }
     
     /// 默认不进行任何处理，直接将 response 作为返回值
-    func output(response: Data, context: ChannelHandlerContext) -> EventLoopFuture<Data> { context.eventLoop.makeSucceededFuture(response) }
+    @inlinable
+    func output(response: Data, context: ChannelHandlerContext) -> EventLoopResult<Data, Failure> { context.eventLoop.makeSucceededResult(response) }
     
     /// 默认调用 `func input(request: Data, context: ChannelHandlerContext)` 完成处理
-    func input(request: ByteBuffer, context: ChannelHandlerContext) -> EventLoopFuture<ByteBuffer> {
+    @inlinable
+    func input(request: ByteBuffer, context: ChannelHandlerContext) -> EventLoopResult<ByteBuffer, Failure> {
         let req = Data(buffer: request)
         return input(request: req, context: context).map { reqData in
             return dataToByteBuffer(data: reqData)
@@ -85,36 +96,40 @@ public extension HTTPIOHandler {
     }
     
     /// 默认调用 `func output(response: Data, context: ChannelHandlerContext)` 完成处理
-    func output(response: ByteBuffer, context: ChannelHandlerContext) -> EventLoopFuture<ByteBuffer> {
+    @inlinable
+    func output(response: ByteBuffer, context: ChannelHandlerContext) -> EventLoopResult<ByteBuffer, Failure> {
         let res = Data(buffer: response)
         return output(response: res, context: context).map { resData in
             return dataToByteBuffer(data: resData)
         }
     }
     
+    @inlinable
     func connectionStart(context: ChannelHandlerContext) -> EventLoopFuture<Void> { context.eventLoop.makeSucceededVoidFuture() }
     
+    @inlinable
     func connectionEnd(context: ChannelHandlerContext) -> EventLoopFuture<Void> { context.eventLoop.makeSucceededVoidFuture() }
     
-    private func dataToByteBuffer(data: Data) -> ByteBuffer {
+    @usableFromInline
+    internal func dataToByteBuffer(data: Data) -> ByteBuffer {
         var buffer = ByteBufferAllocator().buffer(capacity: data.count)
         buffer.writeBytes(data)
         return buffer
     }
 }
 
-final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sendable {
+final internal class CustomCryptoIOHandler<IOHandler>: ChannelDuplexHandler, @unchecked Sendable where IOHandler: HTTPIOHandler {
     typealias InboundIn = ByteBuffer
     typealias OutboundIn = ByteBuffer
     typealias OutboundOut = ByteBuffer
     
     let logger: Logger
-    let ioHandler: HTTPIOHandler
+    let ioHandler: IOHandler
     
     private var headerSent = false
     private var i: Int = 0
 
-    init(ioHandler: HTTPIOHandler, logger: Logger) {
+    init(ioHandler: IOHandler, logger: Logger) {
         self.ioHandler = ioHandler
         self.logger = logger
     }
@@ -133,7 +148,7 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
     
     func write(context: ChannelHandlerContext, data: NIOAny, promise: EventLoopPromise<Void>?) {
         let buffer = self.unwrapOutboundIn(data)
-        let res = ioHandler.output(response: buffer, context: context).flatMap { res in
+        let res = ioHandler.output(response: buffer, context: context).wrapped.flatMap { res in
             return context.writeAndFlush(self.wrapOutboundOut(res))
         }
         
@@ -156,12 +171,14 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
         }
     }
     
+    struct BodyReply: Content {
+        let error: Bool
+        let reason: String
+    }
+    
     func errorHappend(context: ChannelHandlerContext, label: String, error: Error) {
         self.logger.report(error: error)
-        struct BodyReply: Content {
-            let error: Bool
-            let reason: String
-        }
+        
 
         if context.channel.isActive {
             var headers = HTTPHeaders()
@@ -200,3 +217,54 @@ final internal class CustomCryptoIOHandler: ChannelDuplexHandler, @unchecked Sen
 }
 
 extension ChannelHandlerContext: @unchecked @retroactive Sendable {}
+
+@frozen
+public struct AnyHTTPIOHandler: HTTPIOHandler, Sendable {
+    
+    @usableFromInline let _inputData: @Sendable (Data, ChannelHandlerContext) -> EventLoopResult<Data, any Error>
+    @usableFromInline let _outputData: @Sendable (Data, ChannelHandlerContext) -> EventLoopResult<Data, any Error>
+    @usableFromInline let _inputBuffer: @Sendable (ByteBuffer, ChannelHandlerContext) -> EventLoopResult<ByteBuffer, any Error>
+    @usableFromInline let _outputBuffer: @Sendable (ByteBuffer, ChannelHandlerContext) -> EventLoopResult<ByteBuffer, any Error>
+    @usableFromInline let _connectionStart: @Sendable (ChannelHandlerContext) -> EventLoopResult<Void, any Error>
+    @usableFromInline let _connectionEnd: @Sendable (ChannelHandlerContext) -> EventLoopResult<Void, any Error>
+    
+    @inlinable
+    public init<H: HTTPIOHandler>(_ base: H) {
+        _inputData = { base.input(request: $0, context: $1).flatMapErrorThrowing { throw $0 } }
+        _outputData = { base.output(response: $0, context: $1).flatMapErrorThrowing { throw $0 } }
+        _inputBuffer = { base.input(request: $0, context: $1).flatMapErrorThrowing { throw $0 } }
+        _outputBuffer = { base.output(response: $0, context: $1).flatMapErrorThrowing { throw $0 } }
+        _connectionStart = { base.connectionStart(context: $0).flatMapErrorThrowing { throw $0 } }
+        _connectionEnd = { base.connectionEnd(context: $0).flatMapErrorThrowing { throw $0 } }
+    }
+    
+    @inlinable
+    public func input(request: Data, context: ChannelHandlerContext) -> EventLoopResult<Data, any Error> {
+        _inputData(request, context)
+    }
+    
+    @inlinable
+    public func output(response: Data, context: ChannelHandlerContext) -> EventLoopResult<Data, any Error> {
+        _outputData(response, context)
+    }
+    
+    @inlinable
+    public func input(request: ByteBuffer, context: ChannelHandlerContext) -> EventLoopResult<ByteBuffer, any Error> {
+        _inputBuffer(request, context)
+    }
+    
+    @inlinable
+    public func output(response: ByteBuffer, context: ChannelHandlerContext) -> EventLoopResult<ByteBuffer, any Error> {
+        _outputBuffer(response, context)
+    }
+    
+    @inlinable
+    public func connectionStart(context: ChannelHandlerContext) -> EventLoopResult<Void, any Error> {
+        _connectionStart(context)
+    }
+    
+    @inlinable
+    public func connectionEnd(context: ChannelHandlerContext) -> EventLoopResult<Void, any Error> {
+        _connectionEnd(context)
+    }
+}

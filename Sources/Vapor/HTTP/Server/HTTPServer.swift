@@ -668,6 +668,7 @@ extension ChannelPipeline {
         }
     }
 
+    @usableFromInline
     func makeCustomHandlers(application: Application) -> [ChannelHandler] {
         var res: [ChannelHandler] = []
         if let ioHandler = application.httpIOHandler {
